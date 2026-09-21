@@ -1,4 +1,4 @@
-"""Unit tests for api/pptx_builder.copy_slide, isolated from Drive/the DB.
+"""Unit tests for api/index.copy_slide, isolated from Drive/the DB.
 
 Builds small fixture presentations in-memory (no real files needed) covering
 the two things copy_slide has to get right: shape XML deep-copy and
@@ -15,7 +15,7 @@ from pptx import Presentation
 from pptx.util import Inches
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "api"))
-import pptx_builder  # noqa: E402
+import index as pptx_builder  # noqa: E402
 
 
 def _make_png_bytes(color=(255, 0, 0)):
