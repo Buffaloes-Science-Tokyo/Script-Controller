@@ -23,20 +23,22 @@
    - スコープ: `drive`（読み書き。プレビュー生成のため一時ファイルの作成/削除が必要）、`presentations.readonly`
    - 承認済みリダイレクトURI: `https://<webのVercelドメイン>/api/auth/callback/google`（ローカル用に`http://localhost:3000/api/auth/callback/google`も追加）
 3. **Vercel**: 同じGitHubリポジトリから2つのプロジェクトを作成
-   - `web` — Root Directory を `web/` に設定
-   - `export-api` — Root Directory を `export-api/` に設定（Vercelが自動でPythonランタイムを検出する）
-   - `web`プロジェクトに Vercel Blob ストアを作成（Storage タブ）
-4. `web/.env.example` を参考に環境変数を設定（ローカルは`.env.local`、Vercelはプロジェクト設定の Environment Variables）
+   - `web` — Root Directory を `web` に設定（Framework Presetが自動でNext.jsになる）
+   - `export-api` — Root Directory を `export-api` に設定、Framework Presetは **Other**（Vercelが`api/index.py`をPython関数として自動検出する。Build/Install/Output Commandは空欄のままでよい）
+   - `web`プロジェクトの Storage タブで Vercel Blob ストアを作成し、**Connect**（既存プロジェクトに接続）する。これで`BLOB_STORE_ID`・`VERCEL_OIDC_TOKEN`・`BLOB_WEBHOOK_PUBLIC_KEY`が自動的に環境変数へ追加される（手動でトークンをコピーする必要はない）
+4. `web/.env.example` を参考に残りの環境変数を設定（Vercelはプロジェクト設定の Environment Variables）
    - `EXPORT_API_URL` は `export-api` プロジェクトのデプロイ後URLを設定する
+   - Google OAuthの承認済みリダイレクトURIは、`web`プロジェクトの実際のドメインが分かってから設定する（先に仮のURLで作ると後で直し忘れやすい）
 
 ### ローカル開発
 ```
 cd web
 npm install
-npx auth secret          # AUTH_SECRET を生成して .env.local に追記
-npm run db:push          # Neonにテーブルを作成（開発中の反復はpush、本番運用はgenerate+migrate推奨）
+vercel link && vercel env pull   # Vercel側の環境変数（DATABASE_URL, AUTH_*, Blob関連）を.env.localに取得
+npm run db:migrate               # Neonにテーブルを作成
 npm run dev
 ```
+`vercel`コマンドが無い場合は `npm install -g vercel` で入る。CLIを使いたくない場合は、`web/.env.example`を見ながら`.env.local`を手動で作ってもよい（Blob関連の3変数だけは`vercel env pull`でしか取得できないので、その場合サムネイルキャッシュはローカルでは動かない）。
 ```
 cd export-api
 pip install -r requirements.txt
