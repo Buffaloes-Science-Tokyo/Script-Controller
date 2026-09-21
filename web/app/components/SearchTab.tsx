@@ -3,12 +3,15 @@
 import { useState } from "react";
 
 import { apiFetch } from "@/lib/api";
-import type { BasketItem, Play } from "@/lib/types";
+import type { BasketItem, Play, PlayAttributeValue } from "@/lib/types";
+import { EditPlayModal } from "./EditPlayModal";
+import { PlayCard } from "./PlayCard";
 
 export function SearchTab({ onAdd }: { onAdd: (item: BasketItem) => void }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Play[]>([]);
   const [status, setStatus] = useState("");
+  const [editingPlayId, setEditingPlayId] = useState<string | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -24,13 +27,19 @@ export function SearchTab({ onAdd }: { onAdd: (item: BasketItem) => void }) {
     }
   }
 
+  function handleSaved(playId: string, attributes: PlayAttributeValue[]) {
+    setResults((prev) => prev.map((p) => (p.id === playId ? { ...p, attributes } : p)));
+  }
+
+  const editingPlay = results.find((p) => p.id === editingPlayId) ?? null;
+
   return (
     <section>
       <form onSubmit={handleSubmit}>
         <input
           className="growInput"
           type="text"
-          placeholder="プレー名・体型で検索"
+          placeholder="属性の値で検索（プレー名・体系など）"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -39,30 +48,38 @@ export function SearchTab({ onAdd }: { onAdd: (item: BasketItem) => void }) {
       <div className="status">{status}</div>
       <div className="cardGrid">
         {results.map((play) => (
-          <div className="card" key={play.id}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={play.thumbnailUrl ?? undefined} alt={play.playName} />
-            <div className="cardBody">
-              <strong>{play.playName}</strong>
-              <span>{play.formation}</span>
-            </div>
-            <button
-              type="button"
-              onClick={() =>
-                onAdd({
-                  fileId: play.driveFileId,
-                  slideIndex: play.slideIndex,
-                  playName: play.playName,
-                  formation: play.formation,
-                  thumbnailUrl: play.thumbnailUrl,
-                })
-              }
-            >
-              保持に追加
-            </button>
-          </div>
+          <PlayCard
+            key={play.id}
+            thumbnailUrl={play.thumbnailUrl}
+            attributes={play.attributes}
+            onEdit={() => setEditingPlayId(play.id)}
+            actions={
+              <button
+                type="button"
+                onClick={() =>
+                  onAdd({
+                    playId: play.id,
+                    fileId: play.driveFileId,
+                    slideIndex: play.slideIndex,
+                    thumbnailUrl: play.thumbnailUrl,
+                    attributes: play.attributes,
+                  })
+                }
+              >
+                保持に追加
+              </button>
+            }
+          />
         ))}
       </div>
+      {editingPlay && (
+        <EditPlayModal
+          playId={editingPlay.id}
+          initialAttributes={editingPlay.attributes}
+          onClose={() => setEditingPlayId(null)}
+          onSaved={(attributes) => handleSaved(editingPlay.id, attributes)}
+        />
+      )}
     </section>
   );
 }

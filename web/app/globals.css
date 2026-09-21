@@ -244,6 +244,42 @@ button:disabled {
   align-items: flex-start;
 }
 
+.cardClickArea {
+  display: contents;
+}
+
+.cardClickArea.clickable {
+  cursor: pointer;
+}
+
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  z-index: 100;
+}
+
+.modalBox {
+  background: #fff;
+  border-radius: 10px;
+  padding: 1.25rem;
+  max-width: 420px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.schemaEditRow {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  padding: 0.75rem;
+}
+
 .adminForm label {
   display: flex;
   flex-direction: column;

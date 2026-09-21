@@ -1,19 +1,35 @@
+export type AttributeType = "text" | "select";
+
+export type AttributeDef = {
+  id: string;
+  name: string;
+  type: AttributeType;
+  options: string[] | null;
+  sortOrder: number;
+};
+
+export type PlayAttributeValue = {
+  attributeDefId: string;
+  name: string;
+  type: AttributeType;
+  value: string;
+};
+
 export type Play = {
   id: string;
-  playName: string;
-  formation: string | null;
   driveFileId: string;
   slideIndex: number;
   thumbnailUrl: string | null;
   thumbnailError?: string;
+  attributes: PlayAttributeValue[];
 };
 
 export type BasketItem = {
+  playId: string;
   fileId: string;
   slideIndex: number;
-  playName: string;
-  formation: string | null;
   thumbnailUrl: string | null;
+  attributes: PlayAttributeValue[];
 };
 
 export type DriveFile = {
@@ -21,4 +37,5 @@ export type DriveFile = {
   name: string;
   mimeType: string;
   modifiedTime?: string;
+  folderPath: string[];
 };

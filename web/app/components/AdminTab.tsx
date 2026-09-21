@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { apiFetch } from "@/lib/api";
-import type { DriveFile } from "@/lib/types";
+import type { AttributeDef, DriveFile } from "@/lib/types";
 
 export function AdminTab() {
   const [folderId, setFolderId] = useState("");
@@ -15,19 +15,25 @@ export function AdminTab() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewStatus, setPreviewStatus] = useState("");
 
-  const [playName, setPlayName] = useState("");
-  const [formation, setFormation] = useState("");
+  const [attributeDefs, setAttributeDefs] = useState<AttributeDef[]>([]);
+  const [attributeValues, setAttributeValues] = useState<Record<string, string>>({});
   const [saveStatus, setSaveStatus] = useState("");
+
+  useEffect(() => {
+    apiFetch<{ attributes: AttributeDef[] }>("/api/attributes")
+      .then((data) => setAttributeDefs(data.attributes))
+      .catch((err) => setSaveStatus((err as Error).message));
+  }, []);
 
   async function handleBrowse(e: React.FormEvent) {
     e.preventDefault();
-    setFileStatus("読み込み中...");
+    setFileStatus("読み込み中...(サブフォルダも含めて検索します)");
     try {
       const data = await apiFetch<{ files: DriveFile[] }>(
         `/api/drive/files?folderId=${encodeURIComponent(folderId)}`
       );
       setFiles(data.files);
-      setFileStatus("");
+      setFileStatus(data.files.length ? "" : "見つかりませんでした。");
     } catch (err) {
       setFileStatus((err as Error).message);
     }
@@ -68,15 +74,13 @@ export function AdminTab() {
       await apiFetch("/api/plays", {
         method: "POST",
         body: JSON.stringify({
-          playName,
-          formation,
           driveFileId: selectedFile.id,
           slideIndex: slideNumber - 1,
+          attributes: attributeValues,
         }),
       });
       setSaveStatus("保存しました。");
-      setPlayName("");
-      setFormation("");
+      setAttributeValues({});
     } catch (err) {
       setSaveStatus((err as Error).message);
     }
@@ -85,6 +89,7 @@ export function AdminTab() {
   return (
     <section>
       <h2>Driveフォルダから探す</h2>
+      <p className="hint">指定したフォルダ以下を全て（サブフォルダを含めて）検索します。</p>
       <form onSubmit={handleBrowse}>
         <input
           className="growInput"
@@ -99,7 +104,10 @@ export function AdminTab() {
       <div className="fileList">
         {files.map((file) => (
           <div className="fileRow" key={file.id}>
-            <span>{file.name}</span>
+            <span>
+              {file.folderPath.length > 0 ? `${file.folderPath.join(" / ")} / ` : ""}
+              {file.name}
+            </span>
             <button type="button" onClick={() => handleSelectFile(file)}>
               選択
             </button>
@@ -133,23 +141,41 @@ export function AdminTab() {
           {/* eslint-disable-next-line @next/next/no-img-element */}
           {previewUrl && <img src={previewUrl} alt="preview" />}
         </div>
-        <label>
-          プレー名
-          <input
-            type="text"
-            required
-            value={playName}
-            onChange={(e) => setPlayName(e.target.value)}
-          />
-        </label>
-        <label>
-          体型（フォーメーション）
-          <input
-            type="text"
-            value={formation}
-            onChange={(e) => setFormation(e.target.value)}
-          />
-        </label>
+
+        {attributeDefs.map((attribute) => (
+          <label key={attribute.id}>
+            {attribute.name}
+            {attribute.type === "select" ? (
+              <select
+                value={attributeValues[attribute.id] ?? ""}
+                onChange={(e) =>
+                  setAttributeValues((v) => ({ ...v, [attribute.id]: e.target.value }))
+                }
+              >
+                <option value="">（未選択）</option>
+                {(attribute.options ?? []).map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type="text"
+                value={attributeValues[attribute.id] ?? ""}
+                onChange={(e) =>
+                  setAttributeValues((v) => ({ ...v, [attribute.id]: e.target.value }))
+                }
+              />
+            )}
+          </label>
+        ))}
+        {attributeDefs.length === 0 && (
+          <p className="hint">
+            属性が定義されていません。「スキーマ管理」タブで属性（プレー名など）を追加してください。
+          </p>
+        )}
+
         <button type="submit">保存</button>
       </form>
       <div className="status">{saveStatus}</div>

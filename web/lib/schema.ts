@@ -1,10 +1,12 @@
 import type { AdapterAccount } from "@auth/core/adapters";
 import {
   integer,
+  jsonb,
   pgTable,
   primaryKey,
   text,
   timestamp,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 // Auth.js's standard schema for a database-session adapter. The `accounts`
@@ -60,18 +62,48 @@ export const verificationTokens = pgTable(
   (vt) => [primaryKey({ columns: [vt.identifier, vt.token] })]
 );
 
-// The play <-> slide index. Search is a plain ILIKE over playName/formation
-// (see app/api/search/route.ts) - adequate for a curated, playbook-sized
-// list; revisit with a trigram index (pg_trgm) or real full-text search if
-// the list grows large enough to need it.
+// The play <-> slide index. All descriptive metadata (what used to be fixed
+// playName/formation columns) now lives in attributeDefs/playAttributeValues
+// below - a play row is just a pointer to one slide.
 export const plays = pgTable("plays", {
   id: text("id")
     .primaryKey()
     .$defaultFn(() => crypto.randomUUID()),
-  playName: text("play_name").notNull(),
-  formation: text("formation").default(""),
   driveFileId: text("drive_file_id").notNull(),
   slideIndex: integer("slide_index").notNull(),
   createdBy: text("created_by").notNull(),
   updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
 });
+
+// User-defined fields (e.g. "プレー名", "体系"), added/renamed/deleted freely
+// from the Schema tab. `options` is only meaningful when type = "select".
+export const attributeDefs = pgTable("attribute_defs", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  name: text("name").notNull(),
+  type: text("type").$type<"text" | "select">().notNull(),
+  options: jsonb("options").$type<string[]>(),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+});
+
+// EAV-style value storage: one row per (play, attribute) with a value set.
+// Deleting an attributeDef cascades to delete every play's value for it -
+// deliberate, and warned about in the Schema tab's delete confirmation.
+export const playAttributeValues = pgTable(
+  "play_attribute_values",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    playId: text("play_id")
+      .notNull()
+      .references(() => plays.id, { onDelete: "cascade" }),
+    attributeDefId: text("attribute_def_id")
+      .notNull()
+      .references(() => attributeDefs.id, { onDelete: "cascade" }),
+    value: text("value").notNull(),
+  },
+  (t) => [uniqueIndex("play_attribute_values_play_attr_unique").on(t.playId, t.attributeDefId)]
+);

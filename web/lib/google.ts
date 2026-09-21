@@ -92,33 +92,60 @@ export type DriveFile = {
   name: string;
   mimeType: string;
   modifiedTime?: string;
+  /** Folder names from the given root down to this file's parent (empty for a direct child). */
+  folderPath: string[];
 };
 
-/** Lists pptx decks and subfolders directly under folderId (admin file browser). */
+const MAX_FOLDERS_TO_VISIT = 300;
+
+/**
+ * Lists every pptx deck anywhere under folderId, walking all subfolders
+ * (not just direct children) so a coach only has to point at a root folder
+ * once. Capped at MAX_FOLDERS_TO_VISIT so an accidentally-huge root (e.g.
+ * all of "My Drive") can't run away on API quota.
+ */
 export async function listFolder(accessToken: string, folderId: string): Promise<DriveFile[]> {
   const drive = driveClient(accessToken);
   const query =
-    `'${folderId}' in parents and trashed = false and (` +
+    `trashed = false and (` +
     `mimeType = '${FOLDER_MIME}' or ` +
     `mimeType = '${PPTX_MIME}' or ` +
     `mimeType = '${GOOGLE_SLIDES_MIME}')`;
 
   const files: DriveFile[] = [];
-  let pageToken: string | undefined;
-  do {
-    const res = await drive.files.list({
-      q: query,
-      pageSize: 1000,
-      fields: "nextPageToken, files(id, name, mimeType, modifiedTime)",
-      pageToken,
-      supportsAllDrives: true,
-      includeItemsFromAllDrives: true,
-    });
-    for (const f of res.data.files ?? []) {
-      files.push({ id: f.id!, name: f.name!, mimeType: f.mimeType!, modifiedTime: f.modifiedTime ?? undefined });
-    }
-    pageToken = res.data.nextPageToken ?? undefined;
-  } while (pageToken);
+  const queue: { id: string; path: string[] }[] = [{ id: folderId, path: [] }];
+  let visitedFolders = 0;
+
+  while (queue.length > 0 && visitedFolders < MAX_FOLDERS_TO_VISIT) {
+    const current = queue.shift()!;
+    visitedFolders += 1;
+
+    let pageToken: string | undefined;
+    do {
+      const res = await drive.files.list({
+        q: `'${current.id}' in parents and ${query}`,
+        pageSize: 1000,
+        fields: "nextPageToken, files(id, name, mimeType, modifiedTime)",
+        pageToken,
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
+      });
+      for (const f of res.data.files ?? []) {
+        if (f.mimeType === FOLDER_MIME) {
+          queue.push({ id: f.id!, path: [...current.path, f.name!] });
+        } else {
+          files.push({
+            id: f.id!,
+            name: f.name!,
+            mimeType: f.mimeType!,
+            modifiedTime: f.modifiedTime ?? undefined,
+            folderPath: current.path,
+          });
+        }
+      }
+      pageToken = res.data.nextPageToken ?? undefined;
+    } while (pageToken);
+  }
 
   return files;
 }

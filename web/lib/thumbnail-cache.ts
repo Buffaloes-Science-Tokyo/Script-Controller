@@ -14,6 +14,17 @@ function cachePathname(fileId: string, modifiedTime: string, slideIndex: number)
   return `${CACHE_PREFIX}/${fileId}/${safeModifiedTime}/${slideIndex}.png`;
 }
 
+// Vercel injects Blob credentials (BLOB_READ_WRITE_TOKEN, or the OIDC pair
+// BLOB_STORE_ID/VERCEL_OIDC_TOKEN) automatically in deployed environments.
+// Locally, they're only present after `vercel env pull` - rather than make
+// that a hard requirement just to see a thumbnail, fall back to generating
+// (uncached) when they're absent.
+function hasBlobCredentials(): boolean {
+  return Boolean(
+    process.env.BLOB_READ_WRITE_TOKEN || (process.env.BLOB_STORE_ID && process.env.VERCEL_OIDC_TOKEN)
+  );
+}
+
 /**
  * Returns a cached slide thumbnail URL, generating (and caching) it on first
  * request. Cache key is (fileId, modifiedTime, slideIndex): editing the
@@ -30,14 +41,17 @@ export async function getSlideThumbnailUrl(
   fileId: string,
   slideIndex: number
 ): Promise<string> {
+  const cachingEnabled = hasBlobCredentials();
   const metadata = await getFileMetadata(accessToken, fileId);
   const pathname = cachePathname(fileId, metadata.modifiedTime!, slideIndex);
 
-  try {
-    const existing = await head(pathname);
-    return existing.url;
-  } catch (err) {
-    if (!(err instanceof BlobNotFoundError)) throw err;
+  if (cachingEnabled) {
+    try {
+      const existing = await head(pathname);
+      return existing.url;
+    } catch (err) {
+      if (!(err instanceof BlobNotFoundError)) throw err;
+    }
   }
 
   const tempCopyId = await copyAsNativeSlides(accessToken, fileId);
@@ -46,6 +60,10 @@ export async function getSlideThumbnailUrl(
     pngBytes = await renderSlideThumbnail(accessToken, tempCopyId, slideIndex);
   } finally {
     await deleteFile(accessToken, tempCopyId);
+  }
+
+  if (!cachingEnabled) {
+    return `data:image/png;base64,${pngBytes.toString("base64")}`;
   }
 
   const blob = await put(pathname, pngBytes, {

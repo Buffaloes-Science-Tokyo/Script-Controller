@@ -18,12 +18,18 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "fileId and slideIndex are required" }, { status: 400 });
   }
 
+  let accessToken: string;
   try {
-    const accessToken = await getValidAccessToken(session.user.id);
+    accessToken = await getValidAccessToken(session.user.id);
+  } catch (err) {
+    return NextResponse.json({ error: (err as Error).message }, { status: 401 });
+  }
+
+  try {
     const thumbnailUrl = await getSlideThumbnailUrl(accessToken, fileId, slideIndex);
     return NextResponse.json({ thumbnailUrl });
   } catch (err) {
-    const status = err instanceof RangeError ? 400 : 401;
+    const status = err instanceof RangeError ? 400 : 500;
     return NextResponse.json({ error: (err as Error).message }, { status });
   }
 }

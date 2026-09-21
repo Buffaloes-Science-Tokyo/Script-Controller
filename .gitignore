@@ -1,6 +1,7 @@
 credentials.json
 token.json
 client_secret.json
+AGENT_LOG.md
 
 __pycache__/
 *.pyc

@@ -2,18 +2,37 @@
 
 import { useEffect, useState } from "react";
 
-import type { BasketItem } from "./types";
+import type { BasketItem, PlayAttributeValue } from "./types";
 
 const STORAGE_KEY = "scriptControllerBasket";
 
 // Held slides are ephemeral per-session state, not data that needs to be
 // shared or survive across devices, so this stays client-side (localStorage)
 // rather than in the DB - keeps writes limited to the actual play index.
+function isValidBasketItem(item: unknown): item is BasketItem {
+  if (!item || typeof item !== "object") return false;
+  const candidate = item as Record<string, unknown>;
+  return (
+    typeof candidate.playId === "string" &&
+    typeof candidate.fileId === "string" &&
+    typeof candidate.slideIndex === "number" &&
+    Array.isArray(candidate.attributes)
+  );
+}
+
+// The stored shape has changed a few times as the app evolved (fixed
+// playName/formation -> attributes array -> playId). A browser holding data
+// from an older shape would otherwise crash the basket tab on render -
+// silently drop anything that doesn't match the current BasketItem shape
+// instead, rather than requiring people to manually clear localStorage.
 function readStoredItems(): BasketItem[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(isValidBasketItem);
   } catch {
     return [];
   }
@@ -48,7 +67,13 @@ export function useBasket() {
     });
   }
 
-  return { items, add, remove, move };
+  // Updates every basket item pointing at this play (normally just one, but
+  // the same play could have been added to the basket more than once).
+  function updatePlayAttributes(playId: string, attributes: PlayAttributeValue[]) {
+    setItems((prev) => prev.map((item) => (item.playId === playId ? { ...item, attributes } : item)));
+  }
+
+  return { items, add, remove, move, updatePlayAttributes };
 }
 
 export type Basket = ReturnType<typeof useBasket>;

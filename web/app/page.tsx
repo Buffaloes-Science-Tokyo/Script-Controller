@@ -6,10 +6,12 @@ import { useState } from "react";
 import { AdminTab } from "./components/AdminTab";
 import { AuthButton } from "./components/AuthButton";
 import { BasketTab } from "./components/BasketTab";
+import { RegisteredTab } from "./components/RegisteredTab";
+import { SchemaTab } from "./components/SchemaTab";
 import { SearchTab } from "./components/SearchTab";
 import { useBasket } from "@/lib/useBasket";
 
-type TabKey = "search" | "basket" | "admin";
+type TabKey = "search" | "basket" | "admin" | "registered" | "schema";
 
 export default function Home() {
   const { status } = useSession();
@@ -33,6 +35,12 @@ export default function Home() {
               検索
             </button>
             <button
+              className={`tabBtn ${tab === "registered" ? "active" : ""}`}
+              onClick={() => setTab("registered")}
+            >
+              登録済み
+            </button>
+            <button
               className={`tabBtn ${tab === "basket" ? "active" : ""}`}
               onClick={() => setTab("basket")}
             >
@@ -44,11 +52,19 @@ export default function Home() {
             >
               プレー登録
             </button>
+            <button
+              className={`tabBtn ${tab === "schema" ? "active" : ""}`}
+              onClick={() => setTab("schema")}
+            >
+              スキーマ管理
+            </button>
           </nav>
           <main>
             {tab === "search" && <SearchTab onAdd={basket.add} />}
+            {tab === "registered" && <RegisteredTab onAdd={basket.add} />}
             {tab === "basket" && <BasketTab basket={basket} />}
             {tab === "admin" && <AdminTab />}
+            {tab === "schema" && <SchemaTab />}
           </main>
         </>
       )}

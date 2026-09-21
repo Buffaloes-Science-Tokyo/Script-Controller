@@ -3,10 +3,13 @@
 import { useState } from "react";
 
 import type { Basket } from "@/lib/useBasket";
+import { EditPlayModal } from "./EditPlayModal";
+import { PlayCard } from "./PlayCard";
 
 export function BasketTab({ basket }: { basket: Basket }) {
   const [status, setStatus] = useState("");
   const [exporting, setExporting] = useState(false);
+  const [editingPlayId, setEditingPlayId] = useState<string | null>(null);
 
   async function handleExport() {
     setExporting(true);
@@ -38,6 +41,8 @@ export function BasketTab({ basket }: { basket: Basket }) {
     }
   }
 
+  const editingItem = basket.items.find((item) => item.playId === editingPlayId) ?? null;
+
   return (
     <section>
       <p className="hint">
@@ -45,25 +50,26 @@ export function BasketTab({ basket }: { basket: Basket }) {
       </p>
       <div className="basketList">
         {basket.items.map((item, index) => (
-          <div className="basketRow" key={`${item.fileId}-${item.slideIndex}-${index}`}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={item.thumbnailUrl ?? undefined} alt={item.playName} />
-            <div className="basketRowBody">
-              <strong>{item.playName}</strong>
-              <span>{item.formation}</span>
-            </div>
-            <div className="basketRowActions">
-              <button type="button" onClick={() => basket.move(index, -1)}>
-                ↑
-              </button>
-              <button type="button" onClick={() => basket.move(index, 1)}>
-                ↓
-              </button>
-              <button type="button" onClick={() => basket.remove(index)}>
-                削除
-              </button>
-            </div>
-          </div>
+          <PlayCard
+            key={`${item.fileId}-${item.slideIndex}-${index}`}
+            variant="row"
+            thumbnailUrl={item.thumbnailUrl}
+            attributes={item.attributes}
+            onEdit={() => setEditingPlayId(item.playId)}
+            actions={
+              <>
+                <button type="button" onClick={() => basket.move(index, -1)}>
+                  ↑
+                </button>
+                <button type="button" onClick={() => basket.move(index, 1)}>
+                  ↓
+                </button>
+                <button type="button" onClick={() => basket.remove(index)}>
+                  削除
+                </button>
+              </>
+            }
+          />
         ))}
       </div>
       <button
@@ -74,6 +80,14 @@ export function BasketTab({ basket }: { basket: Basket }) {
         選択したスライドをpptxで出力
       </button>
       <div className="status">{status}</div>
+      {editingItem && (
+        <EditPlayModal
+          playId={editingItem.playId}
+          initialAttributes={editingItem.attributes}
+          onClose={() => setEditingPlayId(null)}
+          onSaved={(attributes) => basket.updatePlayAttributes(editingItem.playId, attributes)}
+        />
+      )}
     </section>
   );
 }
