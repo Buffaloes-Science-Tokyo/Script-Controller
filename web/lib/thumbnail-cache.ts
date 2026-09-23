@@ -10,6 +10,7 @@ import {
   isNativeSlides,
   renderSlideThumbnail,
   ThumbnailQuotaError,
+  ThumbnailTransientError,
 } from "./google";
 
 const CACHE_PREFIX = "slide-thumbnails";
@@ -33,6 +34,10 @@ type DeckEntry = { urls: (string | null)[]; hashes: (string | null)[] };
 // routes); the client asks again to continue where it left off.
 const RENDER_BUDGET_MS = 20_000;
 const RENDER_CONCURRENCY = 4;
+// A slide that keeps failing with temporary Google errors is retried in
+// later rounds, but gives up after this many failed rounds.
+const MAX_TRANSIENT_FAILURES = 3;
+const TRANSIENT_RETRY_MS = 3_000;
 
 function hashPng(pngBytes: Buffer) {
   return createHash("sha256").update(pngBytes).digest("hex");
@@ -63,10 +68,13 @@ const MEMORY_DECKS_WITH_BLOB_URLS = 50;
 const globalForCache = globalThis as unknown as {
   deckIndex?: Map<string, DeckEntry>;
   deckRounds?: Map<string, Promise<DeckThumbnails>>;
+  slideFailures?: Map<string, number>;
 };
 const memoryIndex = (globalForCache.deckIndex ??= new Map<string, DeckEntry>());
 // Render rounds in progress, so concurrent requests for one deck share a round.
 const inFlightRounds = (globalForCache.deckRounds ??= new Map<string, Promise<DeckThumbnails>>());
+// Temporary failures per slide ("<deck key>/<index>"), across rounds.
+const slideFailures = (globalForCache.slideFailures ??= new Map<string, number>());
 
 function remember(key: string, entry: DeckEntry) {
   memoryIndex.delete(key);
@@ -186,10 +194,25 @@ async function renderRound(
             deadline
           );
           await storeSlide(key, entry, slideIndex, png);
+          slideFailures.delete(`${key}/${slideIndex}`);
         } catch (err) {
-          if (!(err instanceof ThumbnailQuotaError)) throw err;
-          stop = true;
-          retryAfterMs = Math.max(retryAfterMs, err.retryAfterMs);
+          if (err instanceof ThumbnailQuotaError) {
+            stop = true;
+            retryAfterMs = Math.max(retryAfterMs, err.retryAfterMs);
+          } else if (err instanceof ThumbnailTransientError) {
+            // Leave this slide for a later round; keep rendering the others.
+            const failureKey = `${key}/${slideIndex}`;
+            const failures = (slideFailures.get(failureKey) ?? 0) + 1;
+            slideFailures.set(failureKey, failures);
+            if (failures >= MAX_TRANSIENT_FAILURES) {
+              throw new Error(
+                `スライド${slideIndex + 1}の画像を Google から取得できませんでした（${err.message}）`
+              );
+            }
+            retryAfterMs = Math.max(retryAfterMs, TRANSIENT_RETRY_MS);
+          } else {
+            throw err;
+          }
         }
       }
     }
@@ -205,6 +228,27 @@ async function renderRound(
 
   const complete = isComplete(entry);
   return { ...entry, complete, retryAfterMs: complete ? 0 : retryAfterMs };
+}
+
+/**
+ * The stored content hash of one slide, from the cache only - never renders.
+ * Null when that slide hasn't been rendered (yet); throws RangeError when the
+ * deck is known to have fewer slides.
+ */
+export async function getCachedSlideHash(
+  accessToken: string,
+  fileId: string,
+  slideIndex: number
+): Promise<string | null> {
+  const metadata = await getFileMetadata(accessToken, fileId);
+  const entry = await loadEntry(deckCacheKey(fileId, metadata.modifiedTime!));
+  if (!entry) return null;
+  if (slideIndex >= entry.hashes.length) {
+    throw new RangeError(
+      `slideIndex ${slideIndex} out of range (deck has ${entry.hashes.length} slides)`
+    );
+  }
+  return entry.hashes[slideIndex];
 }
 
 /**

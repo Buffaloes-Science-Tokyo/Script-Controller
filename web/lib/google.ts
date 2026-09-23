@@ -190,6 +190,18 @@ export class ThumbnailQuotaError extends Error {
   }
 }
 
+/**
+ * A temporary Google-side failure rendering or downloading a thumbnail
+ * (5xx, network error). Worth trying that slide again later.
+ */
+export class ThumbnailTransientError extends Error {}
+
+const DOWNLOAD_ATTEMPTS = 3;
+
+function isTransientStatus(status: number) {
+  return status >= 500 || status === 429;
+}
+
 // Module state, so it's shared by every request this server process handles.
 // (Separate serverless instances don't share it - a 429 from Google is still
 // handled below by backing off for a full window.)
@@ -241,20 +253,34 @@ export async function renderSlideThumbnail(
     });
     contentUrl = thumbnail.data.contentUrl!;
   } catch (err) {
-    if ((err as { code?: unknown }).code === 429) {
+    const code = (err as { code?: unknown }).code;
+    if (code === 429) {
       // Quota used up anyway (e.g. by another server instance): back off for
       // a whole window rather than hammering it.
       quotaState.blockedUntil = Date.now() + QUOTA_WINDOW_MS;
       throw new ThumbnailQuotaError(QUOTA_WINDOW_MS);
     }
+    if (typeof code === "number" && isTransientStatus(code)) {
+      throw new ThumbnailTransientError(`Slides API error ${code}: ${(err as Error).message}`);
+    }
     throw err;
   }
 
-  const imageResponse = await fetch(contentUrl);
-  if (!imageResponse.ok) {
-    throw new Error(`Failed to download rendered thumbnail: ${imageResponse.status}`);
+  // The rendered image is served from Google's content servers, which
+  // occasionally answer 5xx. Re-downloading the same URL costs no quota.
+  let lastProblem = "";
+  for (let attempt = 0; attempt < DOWNLOAD_ATTEMPTS; attempt++) {
+    if (attempt > 0) await sleep(500 * 3 ** (attempt - 1));
+    try {
+      const imageResponse = await fetch(contentUrl);
+      if (imageResponse.ok) return Buffer.from(await imageResponse.arrayBuffer());
+      lastProblem = `HTTP ${imageResponse.status}`;
+      if (!isTransientStatus(imageResponse.status)) break;
+    } catch (err) {
+      lastProblem = (err as Error).message;
+    }
   }
-  return Buffer.from(await imageResponse.arrayBuffer());
+  throw new ThumbnailTransientError(`Failed to download rendered thumbnail: ${lastProblem}`);
 }
 
 /** Page object ids of a native Slides presentation, in slide order. */

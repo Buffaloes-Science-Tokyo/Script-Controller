@@ -7,7 +7,7 @@ import { db } from "@/lib/db";
 import { getValidAccessToken } from "@/lib/google";
 import { attachAttributeValues, filterPlayIdsByAttributes, type AttributeFilter } from "@/lib/plays";
 import { attributeDefs, playAttributeValues, plays } from "@/lib/schema";
-import { getDeckThumbnails } from "@/lib/thumbnail-cache";
+import { getCachedSlideHash } from "@/lib/thumbnail-cache";
 
 // Rendering stops after ~20s (lib/thumbnail-cache.ts); leave headroom for
 // the Drive copy/cleanup around it.
@@ -36,19 +36,13 @@ export async function POST(request: NextRequest) {
   }
 
   // Snapshot the slide's current render so later views can tell whether it
-  // changed since registration. The admin UI has just loaded this deck, so
-  // this is normally a cache hit.
+  // changed since registration. Read from the cache only: the registration
+  // form has just loaded (rendered) this deck, and saving must not wait on -
+  // or fail because of - rendering.
   let slideHash: string;
   try {
     const accessToken = await getValidAccessToken(session.user.id);
-    const deck = await getDeckThumbnails(accessToken, driveFileId);
-    if (slideIndex >= deck.hashes.length) {
-      return NextResponse.json(
-        { error: `slideIndex ${slideIndex} out of range (deck has ${deck.hashes.length} slides)` },
-        { status: 400 }
-      );
-    }
-    const hash = deck.hashes[slideIndex];
+    const hash = await getCachedSlideHash(accessToken, driveFileId, slideIndex);
     if (!hash) {
       return NextResponse.json(
         { error: "このスライドの画像を生成中です。表示されてからもう一度保存してください。" },
@@ -57,7 +51,8 @@ export async function POST(request: NextRequest) {
     }
     slideHash = hash;
   } catch (err) {
-    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+    const status = err instanceof RangeError ? 400 : 500;
+    return NextResponse.json({ error: (err as Error).message }, { status });
   }
 
   const prepared = await prepareAttributeValues(attributeValues);
