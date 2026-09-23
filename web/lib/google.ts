@@ -173,86 +173,96 @@ export async function deleteFile(accessToken: string, fileId: string): Promise<v
   await drive.files.delete({ fileId, supportsAllDrives: true });
 }
 
-const THUMBNAIL_MAX_RETRIES = 3;
-
-type SlidesClient = ReturnType<typeof slidesClient>;
+// Slides thumbnails count against the API's "Expensive read requests per
+// minute per user" quota, which is small. Pace them with a sliding one-minute
+// window, kept a little under the quota. Override via env if your project's
+// quota differs (Google Cloud console > IAM & Admin > Quotas).
+const THUMBNAILS_PER_MINUTE = Number(process.env.SLIDES_THUMBNAILS_PER_MINUTE) || 50;
+const QUOTA_WINDOW_MS = 60_000;
 
 /**
- * Renders one page as a PNG. Thumbnail requests count against the Slides API's
- * stricter "expensive read" quota, so a 429 is retried with backoff rather
- * than failing a whole-deck render.
+ * Thrown instead of waiting when a thumbnail can't be requested before the
+ * caller's deadline; callers return what they have and resume later.
  */
-async function renderPage(
-  slides: SlidesClient,
-  presentationId: string,
-  pageObjectId: string
-): Promise<Buffer> {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      const thumbnail = await slides.presentations.pages.getThumbnail({
-        presentationId,
-        pageObjectId,
-        "thumbnailProperties.mimeType": "PNG",
-        "thumbnailProperties.thumbnailSize": "LARGE",
-      });
-
-      const imageResponse = await fetch(thumbnail.data.contentUrl!);
-      if (!imageResponse.ok) {
-        throw new Error(`Failed to download rendered thumbnail: ${imageResponse.status}`);
-      }
-      return Buffer.from(await imageResponse.arrayBuffer());
-    } catch (err) {
-      const code = (err as { code?: unknown }).code;
-      if (code !== 429 || attempt >= THUMBNAIL_MAX_RETRIES) throw err;
-      await new Promise((resolve) => setTimeout(resolve, 1000 * 2 ** attempt));
-    }
+export class ThumbnailQuotaError extends Error {
+  constructor(readonly retryAfterMs: number) {
+    super(`Slides API quota reached; retry in ${Math.ceil(retryAfterMs / 1000)}s`);
   }
 }
 
-async function getPageObjectIds(slides: SlidesClient, presentationId: string) {
+// Module state, so it's shared by every request this server process handles.
+// (Separate serverless instances don't share it - a 429 from Google is still
+// handled below by backing off for a full window.)
+const quotaState = { requestTimes: [] as number[], blockedUntil: 0 };
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function acquireThumbnailSlot(deadline: number) {
+  for (;;) {
+    const now = Date.now();
+    quotaState.requestTimes = quotaState.requestTimes.filter((t) => t > now - QUOTA_WINDOW_MS);
+
+    let readyAt = quotaState.blockedUntil;
+    if (quotaState.requestTimes.length >= THUMBNAILS_PER_MINUTE) {
+      readyAt = Math.max(readyAt, quotaState.requestTimes[0] + QUOTA_WINDOW_MS);
+    }
+    if (readyAt <= now) {
+      quotaState.requestTimes.push(now);
+      return;
+    }
+    if (readyAt > deadline) throw new ThumbnailQuotaError(readyAt - now);
+    await sleep(readyAt - now);
+  }
+}
+
+/**
+ * Renders one page of a native Slides presentation as a PNG, paced by the
+ * quota limiter above. Throws ThumbnailQuotaError if the quota won't allow it
+ * before `deadline`.
+ */
+export async function renderSlideThumbnail(
+  accessToken: string,
+  presentationId: string,
+  pageObjectId: string,
+  deadline: number
+): Promise<Buffer> {
+  await acquireThumbnailSlot(deadline);
+  const slides = slidesClient(accessToken);
+
+  let contentUrl: string;
+  try {
+    const thumbnail = await slides.presentations.pages.getThumbnail({
+      presentationId,
+      pageObjectId,
+      "thumbnailProperties.mimeType": "PNG",
+      "thumbnailProperties.thumbnailSize": "LARGE",
+    });
+    contentUrl = thumbnail.data.contentUrl!;
+  } catch (err) {
+    if ((err as { code?: unknown }).code === 429) {
+      // Quota used up anyway (e.g. by another server instance): back off for
+      // a whole window rather than hammering it.
+      quotaState.blockedUntil = Date.now() + QUOTA_WINDOW_MS;
+      throw new ThumbnailQuotaError(QUOTA_WINDOW_MS);
+    }
+    throw err;
+  }
+
+  const imageResponse = await fetch(contentUrl);
+  if (!imageResponse.ok) {
+    throw new Error(`Failed to download rendered thumbnail: ${imageResponse.status}`);
+  }
+  return Buffer.from(await imageResponse.arrayBuffer());
+}
+
+/** Page object ids of a native Slides presentation, in slide order. */
+export async function getSlidePageIds(accessToken: string, presentationId: string) {
+  const slides = slidesClient(accessToken);
   const presentation = await slides.presentations.get({
     presentationId,
     fields: "slides(objectId)",
   });
   return (presentation.data.slides ?? []).map((page) => page.objectId!);
-}
-
-/** Renders one page of a native Slides presentation as a PNG and returns its bytes. */
-export async function renderSlideThumbnail(
-  accessToken: string,
-  presentationId: string,
-  slideIndex: number
-): Promise<Buffer> {
-  const slides = slidesClient(accessToken);
-  const pageIds = await getPageObjectIds(slides, presentationId);
-  if (slideIndex < 0 || slideIndex >= pageIds.length) {
-    throw new RangeError(
-      `slideIndex ${slideIndex} out of range (deck has ${pageIds.length} slides)`
-    );
-  }
-  return renderPage(slides, presentationId, pageIds[slideIndex]);
-}
-
-const DECK_RENDER_CONCURRENCY = 4;
-
-/** Renders every page of a native Slides presentation, in slide order. */
-export async function renderAllSlideThumbnails(
-  accessToken: string,
-  presentationId: string
-): Promise<Buffer[]> {
-  const slides = slidesClient(accessToken);
-  const pageIds = await getPageObjectIds(slides, presentationId);
-
-  const results: Buffer[] = new Array(pageIds.length);
-  let next = 0;
-  async function worker() {
-    while (next < pageIds.length) {
-      const index = next++;
-      results[index] = await renderPage(slides, presentationId, pageIds[index]);
-    }
-  }
-  await Promise.all(
-    Array.from({ length: Math.min(DECK_RENDER_CONCURRENCY, pageIds.length) }, worker)
-  );
-  return results;
 }

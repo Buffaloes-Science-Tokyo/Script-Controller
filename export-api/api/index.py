@@ -23,10 +23,21 @@ token), so there's no browser CORS concern to configure here.
 """
 import copy
 import io
+import os
+
+import truststore
+
+# Verify HTTPS against the OS certificate store instead of the Google client's
+# bundled list. Needed where antivirus software (e.g. Norton's Web Shield)
+# re-signs HTTPS traffic with its own root certificate, which only the OS
+# store trusts; harmless elsewhere (Vercel's Linux store has the usual roots).
+truststore.inject_into_ssl()
 
 from flask import Flask, jsonify, request, send_file
+from google.auth.exceptions import RefreshError
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
 from pptx import Presentation
 from pptx.opc.constants import RELATIONSHIP_TYPE as RT
@@ -35,6 +46,9 @@ app = Flask(__name__)
 
 R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 
+GOOGLE_SLIDES_MIME = "application/vnd.google-apps.presentation"
+PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+
 _SKIPPED_RELTYPES = {RT.SLIDE_LAYOUT, RT.NOTES_SLIDE}
 _UNSUPPORTED_RELTYPES = {RT.CHART, RT.OLE_OBJECT, RT.VIDEO, RT.MEDIA}
 
@@ -42,11 +56,21 @@ _UNSUPPORTED_RELTYPES = {RT.CHART, RT.OLE_OBJECT, RT.VIDEO, RT.MEDIA}
 # ---------- Drive access ----------
 
 def download_file_bytes(access_token, file_id):
-    """Downloads raw bytes for a source .pptx, read-only, in-memory, never re-uploaded."""
+    """Downloads a source deck as .pptx bytes, read-only, in-memory, never re-uploaded.
+
+    Raw .pptx files are downloaded as-is; native Google Slides files have no
+    binary content to download, so they're exported to .pptx instead.
+    """
     creds = Credentials(token=access_token)
     service = build("drive", "v3", credentials=creds, cache_discovery=False)
 
-    media_request = service.files().get_media(fileId=file_id, supportsAllDrives=True)
+    metadata = service.files().get(
+        fileId=file_id, fields="mimeType", supportsAllDrives=True
+    ).execute()
+    if metadata.get("mimeType") == GOOGLE_SLIDES_MIME:
+        media_request = service.files().export_media(fileId=file_id, mimeType=PPTX_MIME)
+    else:
+        media_request = service.files().get_media(fileId=file_id, supportsAllDrives=True)
     buffer = io.BytesIO()
     downloader = MediaIoBaseDownload(buffer, media_request)
     done = False
@@ -180,6 +204,19 @@ def export():
         pptx_bytes = build_export(access_token, items)
     except NotImplementedError as exc:
         return jsonify(error=str(exc)), 422
+    except RefreshError:
+        # Drive rejected the access token and there's no refresh token here
+        # to renew it (the web app owns refreshing).
+        return jsonify(error="Google access token was rejected - sign in again"), 401
+    except HttpError as exc:
+        # Drive refused (file gone, no access, token expired...): pass its
+        # status and reason on as JSON instead of an HTML 500 page.
+        return jsonify(error=f"Google Drive error: {exc.reason}"), exc.status_code or 502
+    except (IndexError, KeyError, TypeError) as exc:
+        return jsonify(error=f"invalid export item: {exc!r}"), 400
+    except Exception as exc:  # noqa: BLE001 - surface anything else as JSON, not an HTML 500
+        app.logger.exception("export failed")
+        return jsonify(error=f"export failed: {exc}"), 500
 
     return send_file(
         io.BytesIO(pptx_bytes),
@@ -187,3 +224,12 @@ def export():
         as_attachment=True,
         download_name="script.pptx",
     )
+
+
+# Local development: `python api/index.py` serves on http://localhost:5001
+# (set EXPORT_API_URL=http://localhost:5001 in web/.env). On Vercel the app
+# object above is served directly and this block doesn't run.
+if __name__ == "__main__":
+    # No auto-reloader: it mistakes Python caching imported libraries for a
+    # code change and restarts mid-request. Restart manually after edits.
+    app.run(port=int(os.environ.get("PORT", "5001")))

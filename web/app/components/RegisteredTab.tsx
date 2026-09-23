@@ -5,8 +5,10 @@ import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useDataVersion } from "@/lib/dataVersion";
 import type { AttributeDef, BasketItem, Play, PlayAttributeValue } from "@/lib/types";
+import { ComboBox } from "./ComboBox";
 import { EditPlayModal } from "./EditPlayModal";
 import { PlayCard } from "./PlayCard";
+import { StatusText } from "./Spinner";
 
 const PAGE_SIZE = 30;
 
@@ -105,39 +107,27 @@ export function RegisteredTab({
     <section>
       {attributeDefs.length > 0 && (
         <form
+          className="filterForm"
           onSubmit={(e) => {
             e.preventDefault();
             loadFirstPage();
           }}
         >
-          {attributeDefs.map((attribute) =>
-            attribute.type === "select" ? (
-              <select
-                key={attribute.id}
+          {attributeDefs.map((attribute) => (
+            <label className="filterField" key={attribute.id}>
+              <span className="filterLabel">{attribute.name}</span>
+              <ComboBox
                 value={filters[attribute.id] ?? ""}
-                onChange={(e) => setFilters((f) => ({ ...f, [attribute.id]: e.target.value }))}
-              >
-                <option value="">{attribute.name}: すべて</option>
-                {(attribute.options ?? []).map((option) => (
-                  <option key={option} value={option}>
-                    {attribute.name}: {option}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <input
-                key={attribute.id}
-                type="text"
-                placeholder={attribute.name}
-                value={filters[attribute.id] ?? ""}
-                onChange={(e) => setFilters((f) => ({ ...f, [attribute.id]: e.target.value }))}
+                options={attribute.options ?? []}
+                placeholder="すべて"
+                onChange={(value) => setFilters((f) => ({ ...f, [attribute.id]: value }))}
               />
-            )
-          )}
+            </label>
+          ))}
           <button type="submit">絞り込み</button>
         </form>
       )}
-      <div className="status">{status}</div>
+      <StatusText text={status} />
       <div className="cardGrid">
         {results.map((play) => (
           <PlayCard
@@ -172,6 +162,8 @@ export function RegisteredTab({
       {editingPlay && (
         <EditPlayModal
           playId={editingPlay.id}
+          fileId={editingPlay.driveFileId}
+          slideIndex={editingPlay.slideIndex}
           initialAttributes={editingPlay.attributes}
           onClose={() => setEditingPlayId(null)}
           onSaved={(attributes) => handleSaved(editingPlay.id, attributes)}

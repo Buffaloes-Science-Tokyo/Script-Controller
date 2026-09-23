@@ -14,18 +14,26 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "sign in required" }, { status: 401 });
   }
 
-  const q = request.nextUrl.searchParams.get("q")?.trim() ?? "";
+  // Several `q` params = several search words; a play must match every word
+  // (each word may match any of its attribute values).
+  const terms = request.nextUrl.searchParams
+    .getAll("q")
+    .map((q) => q.trim())
+    .filter(Boolean);
+
+  let matchingIds: string[] | null = null;
+  for (const term of terms) {
+    const ids = await searchPlayIdsByAttributeValue(term);
+    matchingIds = matchingIds === null ? ids : matchingIds.filter((id) => ids.includes(id));
+    if (matchingIds.length === 0) return NextResponse.json({ results: [] });
+  }
 
   const baseQuery = db.select().from(plays);
-  const rows = q
-    ? await (async () => {
-        const matchingIds = await searchPlayIdsByAttributeValue(q);
-        if (matchingIds.length === 0) return [];
-        return baseQuery.where(inArray(plays.id, matchingIds)).orderBy(desc(plays.updatedAt)).limit(RESULT_LIMIT);
-      })()
-    : await baseQuery.orderBy(desc(plays.updatedAt)).limit(RESULT_LIMIT);
+  const rows = await (matchingIds !== null ? baseQuery.where(inArray(plays.id, matchingIds)) : baseQuery)
+    .orderBy(desc(plays.updatedAt))
+    .limit(RESULT_LIMIT);
 
-  // Thumbnails are loaded per card by the client (lib/useSlideThumbnail.ts),
+  // Thumbnails are loaded per card by the client (lib/deckThumbnails.ts),
   // one deck render per file, so results come back without waiting on Drive.
   const results = await attachAttributeValues(rows);
   return NextResponse.json({ results });

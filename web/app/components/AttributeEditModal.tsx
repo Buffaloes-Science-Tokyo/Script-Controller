@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import { apiFetch } from "@/lib/api";
 import type { AttributeDef } from "@/lib/types";
+import { StatusText } from "./Spinner";
 
 // `original` tracks which saved option a row started as, so editing its text
 // is sent as a rename (carried over to plays) rather than delete + add.
@@ -155,7 +156,7 @@ export function AttributeEditModal({
               </button>
             )}
           </div>
-          <div className="status">{status}</div>
+          <StatusText text={status} />
         </form>
       </div>
     </div>

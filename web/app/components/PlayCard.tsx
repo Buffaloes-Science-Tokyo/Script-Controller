@@ -1,5 +1,5 @@
 import type { PlayAttributeValue } from "@/lib/types";
-import { useSlideThumbnail } from "@/lib/useSlideThumbnail";
+import { SlideThumbnail } from "./SlideThumbnail";
 
 const NO_TITLE_PLACEHOLDER = "（属性未設定）";
 
@@ -7,19 +7,6 @@ const NO_TITLE_PLACEHOLDER = "（属性未設定）";
 function splitTitleAndTags(attributes: PlayAttributeValue[]) {
   const [first, ...rest] = attributes;
   return { title: first?.value || NO_TITLE_PLACEHOLDER, tags: rest };
-}
-
-function SlideThumbnail({ fileId, slideIndex, alt }: { fileId: string; slideIndex: number; alt: string }) {
-  const { url, error } = useSlideThumbnail(fileId, slideIndex);
-  if (url) {
-    // eslint-disable-next-line @next/next/no-img-element
-    return <img src={url} alt={alt} />;
-  }
-  return (
-    <div className={`thumbPlaceholder${error ? " error" : ""}`} title={error ?? undefined}>
-      {error ? "サムネイルを表示できません" : "読み込み中..."}
-    </div>
-  );
 }
 
 type PlayCardProps = {

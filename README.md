@@ -44,7 +44,7 @@ npm run dev
 ```
 cd export-api
 pip install -r requirements.txt
-python api/index.py       # or: vercel dev
+python api/index.py       # http://localhost:5001 で起動（web/.env に EXPORT_API_URL=http://localhost:5001 を設定）
 ```
 
 ### テスト

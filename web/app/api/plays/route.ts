@@ -9,6 +9,10 @@ import { attachAttributeValues, filterPlayIdsByAttributes, type AttributeFilter 
 import { attributeDefs, playAttributeValues, plays } from "@/lib/schema";
 import { getDeckThumbnails } from "@/lib/thumbnail-cache";
 
+// Rendering stops after ~20s (lib/thumbnail-cache.ts); leave headroom for
+// the Drive copy/cleanup around it.
+export const maxDuration = 60;
+
 const DEFAULT_LIMIT = 30;
 const FILTER_PREFIX = "attr_";
 
@@ -44,7 +48,14 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    slideHash = deck.hashes[slideIndex];
+    const hash = deck.hashes[slideIndex];
+    if (!hash) {
+      return NextResponse.json(
+        { error: "このスライドの画像を生成中です。表示されてからもう一度保存してください。" },
+        { status: 503 }
+      );
+    }
+    slideHash = hash;
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });
   }
@@ -89,7 +100,10 @@ export async function GET(request: NextRequest) {
     const attributeDefId = key.slice(FILTER_PREFIX.length);
     const def = defsById.get(attributeDefId);
     if (!def) continue;
-    filters.push({ attributeDefId, type: def.type, value: value.trim() });
+    // A value picked from the attribute's options matches exactly; anything
+    // else typed into the filter matches partially.
+    const type = (def.options ?? []).includes(value.trim()) ? "select" : "text";
+    filters.push({ attributeDefId, type, value: value.trim() });
   }
 
   const matchingIds = await filterPlayIdsByAttributes(filters);

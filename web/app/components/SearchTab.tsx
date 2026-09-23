@@ -7,6 +7,7 @@ import { useDataVersion } from "@/lib/dataVersion";
 import type { BasketItem, Play, PlayAttributeValue } from "@/lib/types";
 import { EditPlayModal } from "./EditPlayModal";
 import { PlayCard } from "./PlayCard";
+import { StatusText } from "./Spinner";
 
 export function SearchTab({
   onAdd,
@@ -15,17 +16,19 @@ export function SearchTab({
   onAdd: (item: BasketItem) => void;
   onPlayDeleted: (playId: string) => void;
 }) {
-  const [query, setQuery] = useState("");
+  const [terms, setTerms] = useState<string[]>([""]);
   const [results, setResults] = useState<Play[]>([]);
   const [status, setStatus] = useState("");
   const [editingPlayId, setEditingPlayId] = useState<string | null>(null);
-  // The query behind the current results (not the live input), re-run in the
-  // background when plays change elsewhere so the results stay current.
-  const [submittedQuery, setSubmittedQuery] = useState<string | null>(null);
+  // The words behind the current results (not the live inputs), re-run in
+  // the background when plays change elsewhere so the results stay current.
+  const [submittedTerms, setSubmittedTerms] = useState<string[] | null>(null);
   const { playsVersion, playsChanged, schemaChanged } = useDataVersion();
 
-  function fetchResults(q: string) {
-    return apiFetch<{ results: Play[] }>(`/api/search?q=${encodeURIComponent(q)}`);
+  function fetchResults(words: string[]) {
+    const params = new URLSearchParams();
+    for (const word of words) params.append("q", word);
+    return apiFetch<{ results: Play[] }>(`/api/search?${params}`);
   }
 
   function showResults(data: { results: Play[] }) {
@@ -36,17 +39,18 @@ export function SearchTab({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setStatus("検索中...");
-    setSubmittedQuery(query);
+    const words = terms.map((t) => t.trim()).filter(Boolean);
+    setSubmittedTerms(words);
     try {
-      showResults(await fetchResults(query));
+      showResults(await fetchResults(words));
     } catch (err) {
       setStatus((err as Error).message);
     }
   }
 
   useEffect(() => {
-    if (submittedQuery === null) return;
-    fetchResults(submittedQuery)
+    if (submittedTerms === null) return;
+    fetchResults(submittedTerms)
       .then(showResults)
       .catch((err) => setStatus((err as Error).message));
     // Only on plays changes; a new submit runs its own search.
@@ -68,17 +72,44 @@ export function SearchTab({
 
   return (
     <section>
-      <form onSubmit={handleSubmit}>
-        <input
-          className="growInput"
-          type="text"
-          placeholder="属性の値で検索（プレー名・体系など）"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
+      <form className="searchForm" onSubmit={handleSubmit}>
+        {terms.map((term, index) => (
+          <span className="searchTerm" key={index}>
+            <input
+              type="text"
+              autoFocus={index > 0 && index === terms.length - 1}
+              placeholder={index === 0 ? "属性の値で検索（プレー名・体型など）" : "さらに絞り込む単語"}
+              value={term}
+              onChange={(e) =>
+                setTerms((prev) => prev.map((t, i) => (i === index ? e.target.value : t)))
+              }
+            />
+            {terms.length > 1 && (
+              <button
+                type="button"
+                aria-label="この単語を削除"
+                title="この単語を削除"
+                onClick={() => setTerms((prev) => prev.filter((_, i) => i !== index))}
+              >
+                ×
+              </button>
+            )}
+          </span>
+        ))}
+        <button
+          type="button"
+          aria-label="検索単語を追加"
+          title="検索単語を追加"
+          onClick={() => setTerms((prev) => [...prev, ""])}
+        >
+          ＋
+        </button>
         <button type="submit">検索</button>
       </form>
-      <div className="status">{status}</div>
+      {terms.length > 1 && (
+        <p className="hint">入力した全ての単語に当てはまるプレーを表示します。</p>
+      )}
+      <StatusText text={status} />
       <div className="cardGrid">
         {results.map((play) => (
           <PlayCard
@@ -108,6 +139,8 @@ export function SearchTab({
       {editingPlay && (
         <EditPlayModal
           playId={editingPlay.id}
+          fileId={editingPlay.driveFileId}
+          slideIndex={editingPlay.slideIndex}
           initialAttributes={editingPlay.attributes}
           onClose={() => setEditingPlayId(null)}
           onSaved={(attributes) => handleSaved(editingPlay.id, attributes)}

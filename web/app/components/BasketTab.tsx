@@ -6,6 +6,7 @@ import type { Basket } from "@/lib/useBasket";
 import { useDataVersion } from "@/lib/dataVersion";
 import { EditPlayModal } from "./EditPlayModal";
 import { PlayCard } from "./PlayCard";
+import { StatusText } from "./Spinner";
 
 export function BasketTab({ basket }: { basket: Basket }) {
   const [status, setStatus] = useState("");
@@ -82,10 +83,12 @@ export function BasketTab({ basket }: { basket: Basket }) {
       >
         選択したスライドをpptxで出力
       </button>
-      <div className="status">{status}</div>
+      <StatusText text={status} />
       {editingItem && (
         <EditPlayModal
           playId={editingItem.playId}
+          fileId={editingItem.fileId}
+          slideIndex={editingItem.slideIndex}
           initialAttributes={editingItem.attributes}
           onClose={() => setEditingPlayId(null)}
           onSaved={(attributes) => {

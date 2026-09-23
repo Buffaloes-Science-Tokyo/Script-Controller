@@ -17,7 +17,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "sign in required" }, { status: 401 });
   }
   if (!EXPORT_API_URL) {
-    return NextResponse.json({ error: "EXPORT_API_URL is not configured" }, { status: 500 });
+    return NextResponse.json(
+      {
+        error:
+          "出力サービスのURL（EXPORT_API_URL）が設定されていません。web/.env に設定してサーバーを再起動してください。",
+      },
+      { status: 500 }
+    );
   }
 
   const body = await request.text();
@@ -29,14 +35,24 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: (err as Error).message }, { status: 401 });
   }
 
-  const upstream = await fetch(`${EXPORT_API_URL}/export`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Google-Access-Token": accessToken,
-    },
-    body,
-  });
+  let upstream: Response;
+  try {
+    upstream = await fetch(`${EXPORT_API_URL}/export`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Google-Access-Token": accessToken,
+      },
+      body,
+    });
+  } catch (err) {
+    return NextResponse.json(
+      {
+        error: `出力サービス（${EXPORT_API_URL}）に接続できません。起動しているか確認してください。（${(err as Error).message}）`,
+      },
+      { status: 502 }
+    );
+  }
 
   if (!upstream.ok || !upstream.body) {
     const payload = await upstream.json().catch(() => ({ error: "export failed" }));

@@ -5,15 +5,21 @@ import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import type { AttributeDef, PlayAttributeValue } from "@/lib/types";
 import { AttributeValueInput } from "./AttributeValueInput";
+import { SlideThumbnail } from "./SlideThumbnail";
+import { StatusText } from "./Spinner";
 
 export function EditPlayModal({
   playId,
+  fileId,
+  slideIndex,
   initialAttributes,
   onClose,
   onSaved,
   onDeleted,
 }: {
   playId: string;
+  fileId: string;
+  slideIndex: number;
   initialAttributes: PlayAttributeValue[];
   onClose: () => void;
   onSaved: (attributes: PlayAttributeValue[]) => void;
@@ -68,8 +74,11 @@ export function EditPlayModal({
 
   return (
     <div className="modalOverlay" onClick={onClose}>
-      <div className="modalBox" onClick={(e) => e.stopPropagation()}>
+      <div className="modalBox editPlayModal" onClick={(e) => e.stopPropagation()}>
         <h2>プレーを編集</h2>
+        <div className="modalThumb">
+          <SlideThumbnail fileId={fileId} slideIndex={slideIndex} alt={`スライド${slideIndex + 1}`} />
+        </div>
         <form className="adminForm" onSubmit={handleSubmit}>
           {attributeDefs.map((attribute) => (
             <div className="adminField" key={attribute.id}>
@@ -92,7 +101,7 @@ export function EditPlayModal({
               </button>
             )}
           </div>
-          <div className="status">{status}</div>
+          <StatusText text={status} />
         </form>
       </div>
     </div>

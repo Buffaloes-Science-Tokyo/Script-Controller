@@ -4,9 +4,11 @@ import { useEffect, useRef, useState } from "react";
 
 import { apiFetch } from "@/lib/api";
 import { useDataVersion } from "@/lib/dataVersion";
+import { loadDeck, useDeck } from "@/lib/deckThumbnails";
 import type { AttributeDef, DriveFile, Play } from "@/lib/types";
 import { AttributeEditModal } from "./AttributeEditModal";
 import { AttributeValueInput } from "./AttributeValueInput";
+import { DeckProgress, Spinner, StatusText } from "./Spinner";
 
 type BreadcrumbEntry = { id: string; name: string };
 
@@ -24,12 +26,19 @@ type RegistrationState =
  * A mismatch whose hash appears elsewhere in the deck means slides were
  * inserted/removed and the registered content shifted, not that it was edited.
  */
-function registrationState(play: RegisteredPlay, deckHashes: string[] | null): RegistrationState {
+function registrationState(
+  play: RegisteredPlay,
+  deckHashes: (string | null)[] | null,
+  deckComplete: boolean
+): RegistrationState {
   if (!play.slideHash) return { kind: "unknown" };
-  if (!deckHashes) return { kind: "checking" };
-  if (deckHashes[play.slideIndex] === play.slideHash) return { kind: "unchanged" };
-  const toIndex = deckHashes.indexOf(play.slideHash);
-  return toIndex >= 0 ? { kind: "moved", toIndex } : { kind: "changed" };
+  const current = deckHashes?.[play.slideIndex];
+  if (current === play.slideHash) return { kind: "unchanged" };
+  const toIndex = deckHashes?.indexOf(play.slideHash) ?? -1;
+  if (toIndex >= 0) return { kind: "moved", toIndex };
+  // Can't call it changed until every slide has been rendered and compared.
+  if (!deckComplete) return { kind: "checking" };
+  return { kind: "changed" };
 }
 
 function registrationLabel(state: RegistrationState): string {
@@ -62,13 +71,13 @@ export function AdminTab() {
 
   const [selectedFile, setSelectedFile] = useState<DriveFile | null>(null);
   const [slideNumber, setSlideNumber] = useState(1);
-  // Every slide's thumbnail for selectedFile, fetched once per file so that
-  // changing the slide is instant. firstSlideUrl covers the wait for the deck.
-  const [deckUrls, setDeckUrls] = useState<string[] | null>(null);
-  const [deckHashes, setDeckHashes] = useState<string[] | null>(null);
+  // Every slide's thumbnail for selectedFile, loaded progressively (and kept
+  // for the page session) by the shared deck store, so changing the slide
+  // is instant once it's there.
+  const deck = useDeck(selectedFile?.id ?? null);
+  const deckUrls = deck.urls;
+  const deckHashes = deck.hashes;
   const [filePlays, setFilePlays] = useState<RegisteredPlay[]>([]);
-  const [firstSlideUrl, setFirstSlideUrl] = useState<string | null>(null);
-  const [previewError, setPreviewError] = useState("");
   const activeFileId = useRef<string | null>(null);
   // 1 = fit to the preview panel's width
   const [zoom, setZoom] = useState(1);
@@ -116,42 +125,6 @@ export function AdminTab() {
     loadFolder(target.id, path.slice(0, index + 1));
   }
 
-  async function loadPreviews(file: DriveFile) {
-    activeFileId.current = file.id;
-    setDeckUrls(null);
-    setDeckHashes(null);
-    setFirstSlideUrl(null);
-    setPreviewError("");
-
-    const isStale = () => activeFileId.current !== file.id;
-
-    // The first slide alone renders faster than the whole deck, so show it
-    // while the rest are still being generated.
-    apiFetch<{ thumbnailUrl: string }>(
-      `/api/preview?fileId=${encodeURIComponent(file.id)}&slideIndex=0`
-    )
-      .then((data) => {
-        if (!isStale()) setFirstSlideUrl(data.thumbnailUrl);
-      })
-      .catch(() => {
-        // The deck request below reports errors.
-      });
-
-    try {
-      const data = await apiFetch<{ thumbnailUrls: string[]; slideHashes: string[] }>(
-        `/api/preview/deck?fileId=${encodeURIComponent(file.id)}`
-      );
-      if (isStale()) return;
-      for (const url of data.thumbnailUrls) {
-        if (!url.startsWith("data:")) new Image().src = url;
-      }
-      setDeckUrls(data.thumbnailUrls);
-      setDeckHashes(data.slideHashes);
-    } catch (err) {
-      if (!isStale()) setPreviewError((err as Error).message);
-    }
-  }
-
   async function loadFilePlays(fileId: string) {
     try {
       const data = await apiFetch<{ results: RegisteredPlay[] }>(
@@ -170,10 +143,13 @@ export function AdminTab() {
   }, [playsVersion]);
 
   function handleSelectFile(file: DriveFile) {
+    activeFileId.current = file.id;
     setSelectedFile(file);
     setSlideNumber(1);
     setFilePlays([]);
-    loadPreviews(file);
+    // Ahead of any card thumbnails, and re-checked in case the deck was
+    // edited in Drive since it was last loaded.
+    loadDeck(file.id, { priority: true, refresh: true });
     loadFilePlays(file.id);
   }
 
@@ -185,14 +161,8 @@ export function AdminTab() {
     setSlideNumber(Math.min(Math.max(1, Math.round(value)), max));
   }
 
-  const previewUrl = deckUrls?.[slideNumber - 1] ?? (slideNumber === 1 ? firstSlideUrl : null);
-  const previewStatus = previewError
-    ? previewError
-    : selectedFile && !previewUrl
-      ? "読み込み中..."
-      : selectedFile && !deckUrls
-        ? "他のスライドを読み込み中..."
-        : "";
+  const previewUrl = deckUrls?.[slideNumber - 1] ?? null;
+  const renderedCount = deckUrls?.filter((u) => u !== null).length ?? 0;
 
   const currentSlidePlays = filePlays.filter((p) => p.slideIndex === slideNumber - 1);
   const registeredSlides = [...new Set(filePlays.map((p) => p.slideIndex))].sort((a, b) => a - b);
@@ -200,7 +170,7 @@ export function AdminTab() {
   function slideHasProblem(slideIndex: number) {
     return filePlays.some((p) => {
       if (p.slideIndex !== slideIndex) return false;
-      const kind = registrationState(p, deckHashes).kind;
+      const kind = registrationState(p, deckHashes, deck.complete).kind;
       return kind === "changed" || kind === "moved";
     });
   }
@@ -260,7 +230,7 @@ export function AdminTab() {
           </span>
         ))}
       </div>
-      <div className="status">{fileStatus}</div>
+      <StatusText text={fileStatus} />
       <div className="fileList">
         {entries.map((entry) => (
           <div
@@ -381,7 +351,7 @@ export function AdminTab() {
           )}
 
           <button type="submit">保存</button>
-          <div className="status">{saveStatus}</div>
+          <StatusText text={saveStatus} />
         </form>
 
         <div className="previewPanel">
@@ -391,7 +361,7 @@ export function AdminTab() {
                 <span className="registrationBadge none">未登録</span>
               ) : (
                 currentSlidePlays.map((play) => {
-                  const state = registrationState(play, deckHashes);
+                  const state = registrationState(play, deckHashes, deck.complete);
                   const summary = playSummary(play);
                   return (
                     <span key={play.id} className={`registrationBadge ${state.kind}`}>
@@ -425,10 +395,25 @@ export function AdminTab() {
               幅に合わせる
             </button>
           </div>
+          {selectedFile && !deck.complete && !deck.error && (
+            <DeckProgress
+              done={renderedCount}
+              total={deckUrls?.length ?? null}
+              waitingUntil={deck.waitingUntil}
+            />
+          )}
           <div className="previewBox">
-            {previewStatus && <span className="status">{previewStatus}</span>}
-            {!previewUrl && !previewStatus && (
+            {!selectedFile && (
               <span className="hint">ファイルを選択するとここにスライドが表示されます。</span>
+            )}
+            {selectedFile && !previewUrl && deck.error && (
+              <span className="status error">{deck.error}</span>
+            )}
+            {selectedFile && !previewUrl && !deck.error && (
+              <span className="previewLoading">
+                <Spinner size="large" />
+                このスライドを生成中...
+              </span>
             )}
             {previewUrl && (
               // eslint-disable-next-line @next/next/no-img-element
