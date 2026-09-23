@@ -7,16 +7,29 @@ import { AdminTab } from "./components/AdminTab";
 import { AuthButton } from "./components/AuthButton";
 import { BasketTab } from "./components/BasketTab";
 import { RegisteredTab } from "./components/RegisteredTab";
-import { SchemaTab } from "./components/SchemaTab";
 import { SearchTab } from "./components/SearchTab";
+import { DataVersionProvider } from "@/lib/dataVersion";
 import { useBasket } from "@/lib/useBasket";
 
-type TabKey = "search" | "basket" | "admin" | "registered" | "schema";
+type TabKey = "search" | "basket" | "admin" | "registered";
 
 export default function Home() {
   const { status } = useSession();
   const [tab, setTab] = useState<TabKey>("search");
+  // Tabs mount on first visit and then stay mounted (just hidden), so their
+  // loaded data, inputs and scroll position survive switching tabs.
+  const [visited, setVisited] = useState<Set<TabKey>>(() => new Set(["search"]));
   const basket = useBasket();
+
+  function openTab(key: TabKey) {
+    setTab(key);
+    setVisited((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
+  }
+
+  function tabPanel(key: TabKey, content: React.ReactNode) {
+    if (!visited.has(key)) return null;
+    return <div hidden={tab !== key}>{content}</div>;
+  }
 
   return (
     <>
@@ -30,42 +43,43 @@ export default function Home() {
           <nav className="tabs">
             <button
               className={`tabBtn ${tab === "search" ? "active" : ""}`}
-              onClick={() => setTab("search")}
+              onClick={() => openTab("search")}
             >
               検索
             </button>
             <button
               className={`tabBtn ${tab === "registered" ? "active" : ""}`}
-              onClick={() => setTab("registered")}
+              onClick={() => openTab("registered")}
             >
               登録済み
             </button>
             <button
               className={`tabBtn ${tab === "basket" ? "active" : ""}`}
-              onClick={() => setTab("basket")}
+              onClick={() => openTab("basket")}
             >
               保持中 ({basket.items.length})
             </button>
             <button
               className={`tabBtn ${tab === "admin" ? "active" : ""}`}
-              onClick={() => setTab("admin")}
+              onClick={() => openTab("admin")}
             >
               プレー登録
             </button>
-            <button
-              className={`tabBtn ${tab === "schema" ? "active" : ""}`}
-              onClick={() => setTab("schema")}
-            >
-              スキーマ管理
-            </button>
           </nav>
-          <main>
-            {tab === "search" && <SearchTab onAdd={basket.add} />}
-            {tab === "registered" && <RegisteredTab onAdd={basket.add} />}
-            {tab === "basket" && <BasketTab basket={basket} />}
-            {tab === "admin" && <AdminTab />}
-            {tab === "schema" && <SchemaTab />}
-          </main>
+          <DataVersionProvider>
+            <main>
+              {tabPanel(
+                "search",
+                <SearchTab onAdd={basket.add} onPlayDeleted={basket.removePlay} />
+              )}
+              {tabPanel(
+                "registered",
+                <RegisteredTab onAdd={basket.add} onPlayDeleted={basket.removePlay} />
+              )}
+              {tabPanel("basket", <BasketTab basket={basket} />)}
+              {tabPanel("admin", <AdminTab />)}
+            </main>
+          </DataVersionProvider>
         </>
       )}
     </>

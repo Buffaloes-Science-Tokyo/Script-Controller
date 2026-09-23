@@ -19,8 +19,8 @@ export type Play = {
   id: string;
   driveFileId: string;
   slideIndex: number;
-  thumbnailUrl: string | null;
-  thumbnailError?: string;
+  /** Hash of the slide's render at registration; null for older plays. */
+  slideHash?: string | null;
   attributes: PlayAttributeValue[];
 };
 
@@ -28,7 +28,6 @@ export type BasketItem = {
   playId: string;
   fileId: string;
   slideIndex: number;
-  thumbnailUrl: string | null;
   attributes: PlayAttributeValue[];
 };
 
@@ -37,5 +36,5 @@ export type DriveFile = {
   name: string;
   mimeType: string;
   modifiedTime?: string;
-  folderPath: string[];
+  isFolder: boolean;
 };

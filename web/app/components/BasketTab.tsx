@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import type { Basket } from "@/lib/useBasket";
+import { useDataVersion } from "@/lib/dataVersion";
 import { EditPlayModal } from "./EditPlayModal";
 import { PlayCard } from "./PlayCard";
 
@@ -10,6 +11,7 @@ export function BasketTab({ basket }: { basket: Basket }) {
   const [status, setStatus] = useState("");
   const [exporting, setExporting] = useState(false);
   const [editingPlayId, setEditingPlayId] = useState<string | null>(null);
+  const { schemaChanged } = useDataVersion();
 
   async function handleExport() {
     setExporting(true);
@@ -53,7 +55,8 @@ export function BasketTab({ basket }: { basket: Basket }) {
           <PlayCard
             key={`${item.fileId}-${item.slideIndex}-${index}`}
             variant="row"
-            thumbnailUrl={item.thumbnailUrl}
+            fileId={item.fileId}
+            slideIndex={item.slideIndex}
             attributes={item.attributes}
             onEdit={() => setEditingPlayId(item.playId)}
             actions={
@@ -85,7 +88,10 @@ export function BasketTab({ basket }: { basket: Basket }) {
           playId={editingItem.playId}
           initialAttributes={editingItem.attributes}
           onClose={() => setEditingPlayId(null)}
-          onSaved={(attributes) => basket.updatePlayAttributes(editingItem.playId, attributes)}
+          onSaved={(attributes) => {
+            basket.updatePlayAttributes(editingItem.playId, attributes);
+            schemaChanged();
+          }}
         />
       )}
     </section>

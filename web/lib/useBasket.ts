@@ -73,7 +73,13 @@ export function useBasket() {
     setItems((prev) => prev.map((item) => (item.playId === playId ? { ...item, attributes } : item)));
   }
 
-  return { items, add, remove, move, updatePlayAttributes };
+  // Drops every basket item pointing at a play that was deleted, so export
+  // doesn't reference a play that no longer exists.
+  function removePlay(playId: string) {
+    setItems((prev) => prev.filter((item) => item.playId !== playId));
+  }
+
+  return { items, add, remove, move, updatePlayAttributes, removePlay };
 }
 
 export type Basket = ReturnType<typeof useBasket>;

@@ -228,15 +228,192 @@ button:disabled {
   background: #fff;
 }
 
-.previewBox {
-  min-height: 90px;
+.fileRow.selected {
+  border-color: var(--accent, #2563eb);
+  background: #eff6ff;
+}
+
+.fileEntryButton {
   display: flex;
   align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.breadcrumbButton {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--accent, #2563eb);
+  font: inherit;
+}
+
+.breadcrumbButton:disabled {
+  color: inherit;
+  cursor: default;
+  font-weight: 600;
+}
+
+.breadcrumbSep {
+  color: var(--muted);
+}
+
+.slideNav {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.slideNav input[type="number"] {
+  width: 4.5em;
+}
+
+.slideCount {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin-right: auto;
+}
+
+.slideRange {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.registeredSlides {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+}
+
+.registeredChip {
+  padding: 0.1rem 0.5rem;
+  font-size: 0.8rem;
+  border-radius: 999px;
+  border-color: #86efac;
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.registeredChip.warn {
+  border-color: #fcd34d;
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.registeredChip.current {
+  font-weight: 700;
+  outline: 2px solid var(--accent);
+}
+
+.registrationBadges {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.registrationBadge {
+  display: flex;
+  flex-direction: column;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.9rem;
+  background: #fff;
+}
+
+.registrationBadge.unchanged {
+  border-color: #86efac;
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.registrationBadge.changed,
+.registrationBadge.moved {
+  border-color: #fcd34d;
+  background: #fffbeb;
+  color: #92400e;
+  font-weight: 600;
+}
+
+.registrationBadge.none,
+.registrationBadge.unknown,
+.registrationBadge.checking {
+  color: var(--muted);
+}
+
+.registrationSummary {
+  font-size: 0.8rem;
+  font-weight: normal;
+  opacity: 0.85;
+}
+
+.registerLayout {
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) 1fr;
+  gap: 1.25rem;
+  align-items: start;
+}
+
+@media (max-width: 720px) {
+  .registerLayout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.previewPanel {
+  position: sticky;
+  top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.zoomControls {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.zoomLabel {
+  min-width: 3.5em;
+  text-align: center;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.previewBox {
+  min-height: 240px;
+  max-height: 75vh;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #eef0f3;
+  padding: 0.5rem;
 }
 
 .previewBox img {
-  max-width: 240px;
-  max-height: 180px;
+  display: block;
+  max-width: none;
+  margin: 0 auto;
 }
 
 .adminForm {
@@ -280,7 +457,8 @@ button:disabled {
   padding: 0.75rem;
 }
 
-.adminForm label {
+.adminForm label,
+.adminForm .adminField {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
@@ -288,4 +466,103 @@ button:disabled {
   max-width: 320px;
   font-size: 0.9rem;
   color: var(--muted);
+}
+
+.dangerBtn {
+  color: #b91c1c;
+  border-color: #fca5a5;
+  margin-left: auto;
+}
+
+.dangerBtn:hover {
+  border-color: #b91c1c;
+  background: #fef2f2;
+}
+
+.thumbPlaceholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #eef0f3;
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-align: center;
+  padding: 0.25rem;
+}
+
+.thumbPlaceholder.error {
+  color: #b91c1c;
+}
+
+.card .thumbPlaceholder {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+}
+
+.basketRow .thumbPlaceholder {
+  width: 64px;
+  height: 48px;
+  border-radius: 4px;
+  font-size: 0.6rem;
+}
+
+.attributeHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  max-width: 320px;
+  margin-top: 0.5rem;
+  font-weight: 600;
+}
+
+.attributeLabel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.smallBtn {
+  padding: 0.15rem 0.5rem;
+  font-size: 0.8rem;
+}
+
+.attributeValueInput {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.attributeValueInput .hint {
+  margin-bottom: 0;
+  font-size: 0.8rem;
+}
+
+.attributeValueRow {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.attributeValueRow input {
+  flex: 1;
+  min-width: 0;
+}
+
+.adminForm select {
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.95rem;
+  font-family: inherit;
+  background: #fff;
+  color: var(--text);
+}
+
+.addOptionBtn {
+  align-self: flex-start;
+}
+
+.modalActions {
+  width: 100%;
 }

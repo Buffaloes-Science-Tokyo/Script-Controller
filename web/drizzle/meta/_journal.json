@@ -22,6 +22,20 @@
       "when": 1790030922834,
       "tag": "0002_drop_play_fixed_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790164973951,
+      "tag": "0003_add_play_slide_hash",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790167805922,
+      "tag": "0004_attributes_to_select",
+      "breakpoints": true
     }
   ]
 }

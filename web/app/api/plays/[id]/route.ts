@@ -1,12 +1,28 @@
 import { eq } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 
+import { prepareAttributeValues } from "@/lib/attributeValues";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { attachAttributeValues } from "@/lib/plays";
-import { attributeDefs, playAttributeValues, plays } from "@/lib/schema";
+import { playAttributeValues, plays } from "@/lib/schema";
 
 type RouteParams = { params: Promise<{ id: string }> };
+
+/** Deletes a play; its attribute values go with it via the FK cascade. */
+export async function DELETE(_request: NextRequest, { params }: RouteParams) {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "sign in required" }, { status: 401 });
+  }
+
+  const { id } = await params;
+  const deleted = await db.delete(plays).where(eq(plays.id, id)).returning({ id: plays.id });
+  if (deleted.length === 0) {
+    return NextResponse.json({ error: "play not found" }, { status: 404 });
+  }
+  return NextResponse.json({ ok: true });
+}
 
 /** Replaces a play's attribute values wholesale (used by the click-to-edit popup). */
 export async function PATCH(request: NextRequest, { params }: RouteParams) {
@@ -25,25 +41,11 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
   const attributeValues: Record<string, unknown> =
     body.attributes && typeof body.attributes === "object" ? body.attributes : {};
 
-  const defs = await db.select().from(attributeDefs);
-  const defsById = new Map(defs.map((d) => [d.id, d]));
-
-  const rowsToInsert: { attributeDefId: string; value: string }[] = [];
-  for (const [attributeDefId, rawValue] of Object.entries(attributeValues)) {
-    if (typeof rawValue !== "string" || !rawValue.trim()) continue;
-    const value = rawValue.trim();
-    const def = defsById.get(attributeDefId);
-    if (!def) {
-      return NextResponse.json({ error: `unknown attribute id: ${attributeDefId}` }, { status: 400 });
-    }
-    if (def.type === "select" && !(def.options ?? []).includes(value)) {
-      return NextResponse.json(
-        { error: `"${value}" is not one of ${def.name}'s options` },
-        { status: 400 }
-      );
-    }
-    rowsToInsert.push({ attributeDefId, value });
+  const prepared = await prepareAttributeValues(attributeValues);
+  if ("error" in prepared) {
+    return NextResponse.json({ error: prepared.error }, { status: 400 });
   }
+  const rowsToInsert = prepared.rows;
 
   // Replace wholesale: clear this play's values, then insert the submitted set.
   await db.delete(playAttributeValues).where(eq(playAttributeValues.playId, id));

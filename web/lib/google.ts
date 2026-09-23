@@ -92,19 +92,18 @@ export type DriveFile = {
   name: string;
   mimeType: string;
   modifiedTime?: string;
-  /** Folder names from the given root down to this file's parent (empty for a direct child). */
-  folderPath: string[];
+  isFolder: boolean;
 };
 
-const MAX_FOLDERS_TO_VISIT = 300;
-
 /**
- * Lists every pptx deck anywhere under folderId, walking all subfolders
- * (not just direct children) so a coach only has to point at a root folder
- * once. Capped at MAX_FOLDERS_TO_VISIT so an accidentally-huge root (e.g.
- * all of "My Drive") can't run away on API quota.
+ * Lists the direct children of folderId (subfolders and pptx decks only),
+ * like a normal Drive folder view - the caller drives navigation by calling
+ * this again with a subfolder's id when the user clicks into it.
  */
-export async function listFolder(accessToken: string, folderId: string): Promise<DriveFile[]> {
+export async function listFolderChildren(
+  accessToken: string,
+  folderId: string
+): Promise<DriveFile[]> {
   const drive = driveClient(accessToken);
   const query =
     `trashed = false and (` +
@@ -113,41 +112,34 @@ export async function listFolder(accessToken: string, folderId: string): Promise
     `mimeType = '${GOOGLE_SLIDES_MIME}')`;
 
   const files: DriveFile[] = [];
-  const queue: { id: string; path: string[] }[] = [{ id: folderId, path: [] }];
-  let visitedFolders = 0;
-
-  while (queue.length > 0 && visitedFolders < MAX_FOLDERS_TO_VISIT) {
-    const current = queue.shift()!;
-    visitedFolders += 1;
-
-    let pageToken: string | undefined;
-    do {
-      const res = await drive.files.list({
-        q: `'${current.id}' in parents and ${query}`,
-        pageSize: 1000,
-        fields: "nextPageToken, files(id, name, mimeType, modifiedTime)",
-        pageToken,
-        supportsAllDrives: true,
-        includeItemsFromAllDrives: true,
+  let pageToken: string | undefined;
+  do {
+    const res = await drive.files.list({
+      q: `'${folderId}' in parents and ${query}`,
+      pageSize: 1000,
+      fields: "nextPageToken, files(id, name, mimeType, modifiedTime)",
+      pageToken,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+      orderBy: "folder, name_natural",
+    });
+    for (const f of res.data.files ?? []) {
+      files.push({
+        id: f.id!,
+        name: f.name!,
+        mimeType: f.mimeType!,
+        modifiedTime: f.modifiedTime ?? undefined,
+        isFolder: f.mimeType === FOLDER_MIME,
       });
-      for (const f of res.data.files ?? []) {
-        if (f.mimeType === FOLDER_MIME) {
-          queue.push({ id: f.id!, path: [...current.path, f.name!] });
-        } else {
-          files.push({
-            id: f.id!,
-            name: f.name!,
-            mimeType: f.mimeType!,
-            modifiedTime: f.modifiedTime ?? undefined,
-            folderPath: current.path,
-          });
-        }
-      }
-      pageToken = res.data.nextPageToken ?? undefined;
-    } while (pageToken);
-  }
+    }
+    pageToken = res.data.nextPageToken ?? undefined;
+  } while (pageToken);
 
   return files;
+}
+
+export function isNativeSlides(mimeType: string | null | undefined): boolean {
+  return mimeType === GOOGLE_SLIDES_MIME;
 }
 
 export async function getFileMetadata(accessToken: string, fileId: string) {
@@ -181,6 +173,50 @@ export async function deleteFile(accessToken: string, fileId: string): Promise<v
   await drive.files.delete({ fileId, supportsAllDrives: true });
 }
 
+const THUMBNAIL_MAX_RETRIES = 3;
+
+type SlidesClient = ReturnType<typeof slidesClient>;
+
+/**
+ * Renders one page as a PNG. Thumbnail requests count against the Slides API's
+ * stricter "expensive read" quota, so a 429 is retried with backoff rather
+ * than failing a whole-deck render.
+ */
+async function renderPage(
+  slides: SlidesClient,
+  presentationId: string,
+  pageObjectId: string
+): Promise<Buffer> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const thumbnail = await slides.presentations.pages.getThumbnail({
+        presentationId,
+        pageObjectId,
+        "thumbnailProperties.mimeType": "PNG",
+        "thumbnailProperties.thumbnailSize": "LARGE",
+      });
+
+      const imageResponse = await fetch(thumbnail.data.contentUrl!);
+      if (!imageResponse.ok) {
+        throw new Error(`Failed to download rendered thumbnail: ${imageResponse.status}`);
+      }
+      return Buffer.from(await imageResponse.arrayBuffer());
+    } catch (err) {
+      const code = (err as { code?: unknown }).code;
+      if (code !== 429 || attempt >= THUMBNAIL_MAX_RETRIES) throw err;
+      await new Promise((resolve) => setTimeout(resolve, 1000 * 2 ** attempt));
+    }
+  }
+}
+
+async function getPageObjectIds(slides: SlidesClient, presentationId: string) {
+  const presentation = await slides.presentations.get({
+    presentationId,
+    fields: "slides(objectId)",
+  });
+  return (presentation.data.slides ?? []).map((page) => page.objectId!);
+}
+
 /** Renders one page of a native Slides presentation as a PNG and returns its bytes. */
 export async function renderSlideThumbnail(
   accessToken: string,
@@ -188,26 +224,35 @@ export async function renderSlideThumbnail(
   slideIndex: number
 ): Promise<Buffer> {
   const slides = slidesClient(accessToken);
-
-  const presentation = await slides.presentations.get({ presentationId });
-  const pages = presentation.data.slides ?? [];
-  if (slideIndex < 0 || slideIndex >= pages.length) {
+  const pageIds = await getPageObjectIds(slides, presentationId);
+  if (slideIndex < 0 || slideIndex >= pageIds.length) {
     throw new RangeError(
-      `slideIndex ${slideIndex} out of range (deck has ${pages.length} slides)`
+      `slideIndex ${slideIndex} out of range (deck has ${pageIds.length} slides)`
     );
   }
-  const pageObjectId = pages[slideIndex].objectId!;
+  return renderPage(slides, presentationId, pageIds[slideIndex]);
+}
 
-  const thumbnail = await slides.presentations.pages.getThumbnail({
-    presentationId,
-    pageObjectId,
-    "thumbnailProperties.mimeType": "PNG",
-    "thumbnailProperties.thumbnailSize": "LARGE",
-  });
+const DECK_RENDER_CONCURRENCY = 4;
 
-  const imageResponse = await fetch(thumbnail.data.contentUrl!);
-  if (!imageResponse.ok) {
-    throw new Error(`Failed to download rendered thumbnail: ${imageResponse.status}`);
+/** Renders every page of a native Slides presentation, in slide order. */
+export async function renderAllSlideThumbnails(
+  accessToken: string,
+  presentationId: string
+): Promise<Buffer[]> {
+  const slides = slidesClient(accessToken);
+  const pageIds = await getPageObjectIds(slides, presentationId);
+
+  const results: Buffer[] = new Array(pageIds.length);
+  let next = 0;
+  async function worker() {
+    while (next < pageIds.length) {
+      const index = next++;
+      results[index] = await renderPage(slides, presentationId, pageIds[index]);
+    }
   }
-  return Buffer.from(await imageResponse.arrayBuffer());
+  await Promise.all(
+    Array.from({ length: Math.min(DECK_RENDER_CONCURRENCY, pageIds.length) }, worker)
+  );
+  return results;
 }

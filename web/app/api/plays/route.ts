@@ -1,10 +1,13 @@
-import { desc, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 
+import { prepareAttributeValues } from "@/lib/attributeValues";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { getValidAccessToken } from "@/lib/google";
 import { attachAttributeValues, filterPlayIdsByAttributes, type AttributeFilter } from "@/lib/plays";
 import { attributeDefs, playAttributeValues, plays } from "@/lib/schema";
+import { getDeckThumbnails } from "@/lib/thumbnail-cache";
 
 const DEFAULT_LIMIT = 30;
 const FILTER_PREFIX = "attr_";
@@ -28,29 +31,33 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "slideIndex must be a non-negative integer" }, { status: 400 });
   }
 
-  const defs = await db.select().from(attributeDefs);
-  const defsById = new Map(defs.map((d) => [d.id, d]));
-
-  const rowsToInsert: { attributeDefId: string; value: string }[] = [];
-  for (const [attributeDefId, rawValue] of Object.entries(attributeValues)) {
-    if (typeof rawValue !== "string" || !rawValue.trim()) continue;
-    const value = rawValue.trim();
-    const def = defsById.get(attributeDefId);
-    if (!def) {
-      return NextResponse.json({ error: `unknown attribute id: ${attributeDefId}` }, { status: 400 });
-    }
-    if (def.type === "select" && !(def.options ?? []).includes(value)) {
+  // Snapshot the slide's current render so later views can tell whether it
+  // changed since registration. The admin UI has just loaded this deck, so
+  // this is normally a cache hit.
+  let slideHash: string;
+  try {
+    const accessToken = await getValidAccessToken(session.user.id);
+    const deck = await getDeckThumbnails(accessToken, driveFileId);
+    if (slideIndex >= deck.hashes.length) {
       return NextResponse.json(
-        { error: `"${value}" is not one of ${def.name}'s options` },
+        { error: `slideIndex ${slideIndex} out of range (deck has ${deck.hashes.length} slides)` },
         { status: 400 }
       );
     }
-    rowsToInsert.push({ attributeDefId, value });
+    slideHash = deck.hashes[slideIndex];
+  } catch (err) {
+    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
   }
+
+  const prepared = await prepareAttributeValues(attributeValues);
+  if ("error" in prepared) {
+    return NextResponse.json({ error: prepared.error }, { status: 400 });
+  }
+  const rowsToInsert = prepared.rows;
 
   const [play] = await db
     .insert(plays)
-    .values({ driveFileId, slideIndex, createdBy: session.user.id })
+    .values({ driveFileId, slideIndex, slideHash, createdBy: session.user.id })
     .returning();
 
   if (rowsToInsert.length > 0) {
@@ -90,8 +97,16 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ results: [], hasMore: false });
   }
 
-  const baseQuery = db.select().from(plays);
-  const rows = await (matchingIds !== null ? baseQuery.where(inArray(plays.id, matchingIds)) : baseQuery)
+  const driveFileId = searchParams.get("driveFileId");
+  const conditions = [
+    matchingIds !== null ? inArray(plays.id, matchingIds) : undefined,
+    driveFileId ? eq(plays.driveFileId, driveFileId) : undefined,
+  ];
+
+  const rows = await db
+    .select()
+    .from(plays)
+    .where(and(...conditions))
     .orderBy(desc(plays.updatedAt))
     .limit(limit + 1)
     .offset(offset);

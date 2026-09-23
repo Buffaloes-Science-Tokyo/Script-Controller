@@ -3,10 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { getValidAccessToken } from "@/lib/google";
 import { attachAttributeValues, searchPlayIdsByAttributeValue } from "@/lib/plays";
 import { plays } from "@/lib/schema";
-import { getSlideThumbnailUrl } from "@/lib/thumbnail-cache";
 
 const RESULT_LIMIT = 25;
 
@@ -27,25 +25,8 @@ export async function GET(request: NextRequest) {
       })()
     : await baseQuery.orderBy(desc(plays.updatedAt)).limit(RESULT_LIMIT);
 
-  const playsWithAttributes = await attachAttributeValues(rows);
-
-  let accessToken: string;
-  try {
-    accessToken = await getValidAccessToken(session.user.id);
-  } catch (err) {
-    return NextResponse.json({ error: (err as Error).message }, { status: 401 });
-  }
-
-  const results = await Promise.all(
-    playsWithAttributes.map(async (play) => {
-      try {
-        const thumbnailUrl = await getSlideThumbnailUrl(accessToken, play.driveFileId, play.slideIndex);
-        return { ...play, thumbnailUrl };
-      } catch (err) {
-        return { ...play, thumbnailUrl: null, thumbnailError: (err as Error).message };
-      }
-    })
-  );
-
+  // Thumbnails are loaded per card by the client (lib/useSlideThumbnail.ts),
+  // one deck render per file, so results come back without waiting on Drive.
+  const results = await attachAttributeValues(rows);
   return NextResponse.json({ results });
 }

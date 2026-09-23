@@ -1,0 +1,1 @@
+ALTER TABLE "plays" ADD COLUMN "slide_hash" text;

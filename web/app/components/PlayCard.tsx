@@ -1,4 +1,5 @@
 import type { PlayAttributeValue } from "@/lib/types";
+import { useSlideThumbnail } from "@/lib/useSlideThumbnail";
 
 const NO_TITLE_PLACEHOLDER = "（属性未設定）";
 
@@ -8,8 +9,22 @@ function splitTitleAndTags(attributes: PlayAttributeValue[]) {
   return { title: first?.value || NO_TITLE_PLACEHOLDER, tags: rest };
 }
 
+function SlideThumbnail({ fileId, slideIndex, alt }: { fileId: string; slideIndex: number; alt: string }) {
+  const { url, error } = useSlideThumbnail(fileId, slideIndex);
+  if (url) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={url} alt={alt} />;
+  }
+  return (
+    <div className={`thumbPlaceholder${error ? " error" : ""}`} title={error ?? undefined}>
+      {error ? "サムネイルを表示できません" : "読み込み中..."}
+    </div>
+  );
+}
+
 type PlayCardProps = {
-  thumbnailUrl: string | null;
+  fileId: string;
+  slideIndex: number;
   attributes: PlayAttributeValue[];
   variant?: "card" | "row";
   actions?: React.ReactNode;
@@ -17,14 +32,20 @@ type PlayCardProps = {
   onEdit?: () => void;
 };
 
-export function PlayCard({ thumbnailUrl, attributes, variant = "card", actions, onEdit }: PlayCardProps) {
+export function PlayCard({
+  fileId,
+  slideIndex,
+  attributes,
+  variant = "card",
+  actions,
+  onEdit,
+}: PlayCardProps) {
   const { title, tags } = splitTitleAndTags(attributes);
   const bodyClassName = variant === "row" ? "basketRowBody" : "cardBody";
 
   const content = (
     <div className={`cardClickArea${onEdit ? " clickable" : ""}`} onClick={onEdit}>
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={thumbnailUrl ?? undefined} alt={title} />
+      <SlideThumbnail fileId={fileId} slideIndex={slideIndex} alt={title} />
       <div className={bodyClassName}>
         <strong>{title}</strong>
         {tags.map((tag) => (

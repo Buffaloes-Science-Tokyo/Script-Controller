@@ -3,13 +3,20 @@
 import { useEffect, useState } from "react";
 
 import { apiFetch } from "@/lib/api";
+import { useDataVersion } from "@/lib/dataVersion";
 import type { AttributeDef, BasketItem, Play, PlayAttributeValue } from "@/lib/types";
 import { EditPlayModal } from "./EditPlayModal";
 import { PlayCard } from "./PlayCard";
 
 const PAGE_SIZE = 30;
 
-export function RegisteredTab({ onAdd }: { onAdd: (item: BasketItem) => void }) {
+export function RegisteredTab({
+  onAdd,
+  onPlayDeleted,
+}: {
+  onAdd: (item: BasketItem) => void;
+  onPlayDeleted: (playId: string) => void;
+}) {
   const [attributeDefs, setAttributeDefs] = useState<AttributeDef[]>([]);
   const [filters, setFilters] = useState<Record<string, string>>({});
 
@@ -18,15 +25,16 @@ export function RegisteredTab({ onAdd }: { onAdd: (item: BasketItem) => void }) 
   const [status, setStatus] = useState("");
   const [loadingMore, setLoadingMore] = useState(false);
   const [editingPlayId, setEditingPlayId] = useState<string | null>(null);
+  const { playsVersion, schemaVersion, playsChanged, schemaChanged } = useDataVersion();
 
   useEffect(() => {
     apiFetch<{ attributes: AttributeDef[] }>("/api/attributes")
       .then((data) => setAttributeDefs(data.attributes))
       .catch(() => {});
-  }, []);
+  }, [schemaVersion]);
 
-  function buildQuery(offset: number) {
-    const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(offset) });
+  function buildQuery(offset: number, limit = PAGE_SIZE) {
+    const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
     for (const [attributeDefId, value] of Object.entries(filters)) {
       if (value.trim()) params.set(`attr_${attributeDefId}`, value.trim());
     }
@@ -51,8 +59,11 @@ export function RegisteredTab({ onAdd }: { onAdd: (item: BasketItem) => void }) 
   // first statement, which the effects lint rule flags when called straight
   // from an effect body (loadFirstPage itself stays reusable for the filter
   // form's submit handler, which isn't inside an effect).
+  // Also re-runs in the background when plays change elsewhere, keeping as
+  // many rows as are already loaded (the API caps a page at 100).
   useEffect(() => {
-    apiFetch<{ results: Play[]; hasMore: boolean }>(`/api/plays?${buildQuery(0)}`)
+    const limit = Math.min(Math.max(PAGE_SIZE, results.length), 100);
+    apiFetch<{ results: Play[]; hasMore: boolean }>(`/api/plays?${buildQuery(0, limit)}`)
       .then((data) => {
         setResults(data.results);
         setHasMore(data.hasMore);
@@ -60,7 +71,7 @@ export function RegisteredTab({ onAdd }: { onAdd: (item: BasketItem) => void }) 
       })
       .catch((err) => setStatus((err as Error).message));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [playsVersion]);
 
   async function loadMore() {
     setLoadingMore(true);
@@ -79,6 +90,13 @@ export function RegisteredTab({ onAdd }: { onAdd: (item: BasketItem) => void }) 
 
   function handleSaved(playId: string, attributes: PlayAttributeValue[]) {
     setResults((prev) => prev.map((p) => (p.id === playId ? { ...p, attributes } : p)));
+    schemaChanged();
+  }
+
+  function handleDeleted(playId: string) {
+    setResults((prev) => prev.filter((p) => p.id !== playId));
+    onPlayDeleted(playId);
+    playsChanged();
   }
 
   const editingPlay = results.find((p) => p.id === editingPlayId) ?? null;
@@ -124,7 +142,8 @@ export function RegisteredTab({ onAdd }: { onAdd: (item: BasketItem) => void }) 
         {results.map((play) => (
           <PlayCard
             key={play.id}
-            thumbnailUrl={play.thumbnailUrl}
+            fileId={play.driveFileId}
+            slideIndex={play.slideIndex}
             attributes={play.attributes}
             onEdit={() => setEditingPlayId(play.id)}
             actions={
@@ -135,7 +154,6 @@ export function RegisteredTab({ onAdd }: { onAdd: (item: BasketItem) => void }) 
                     playId: play.id,
                     fileId: play.driveFileId,
                     slideIndex: play.slideIndex,
-                    thumbnailUrl: play.thumbnailUrl,
                     attributes: play.attributes,
                   })
                 }
@@ -157,6 +175,7 @@ export function RegisteredTab({ onAdd }: { onAdd: (item: BasketItem) => void }) 
           initialAttributes={editingPlay.attributes}
           onClose={() => setEditingPlayId(null)}
           onSaved={(attributes) => handleSaved(editingPlay.id, attributes)}
+          onDeleted={() => handleDeleted(editingPlay.id)}
         />
       )}
     </section>

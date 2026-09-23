@@ -16,7 +16,7 @@
 - **`export-api/`** — 独立したPython (Flask) サービス。エクスポート（保持したスライドをpptxに組み立てる）だけを担当。`python-pptx`にはプレゼンテーション間でスライドをコピーする機能が無いため、その部分（`copy_slide`、ユニットテスト済み）をPythonのまま残している。Next.js側からサーバー間通信でのみ呼ばれ、ブラウザから直接叩かれることはない
 - **認証**: Auth.js (next-auth v5)、Googleプロバイダ。各コーチが自分のGoogleアカウントでサインインし、そのDrive権限で動作する（共有サービスアカウントではない）。`access_type=offline`+`prompt=consent`でrefresh_tokenを取得し、Neonの`accounts`テーブルに保存 → アクセストークンが1時間で切れても、サーバー側で自動的に再取得する（ブラウザに再接続を促す必要がない）
 - **サムネイルキャッシュ**: Vercel Blob。`(fileId, modifiedTime, slideIndex)`をキーにキャッシュし、元ファイルが編集されると自動的に無効化される
-- **プレーの属性**: プレー名・体系を含め、プレーに紐づく項目は全て「スキーマ管理」タブでユーザーが自由に追加・編集・削除できる属性（`attributeDefs`/`playAttributeValues`、EAV方式）。固定カラムは無い
+- **プレーの属性**: プレー名・体系を含め、プレーに紐づく項目は全て「プレー登録」タブでユーザーが自由に追加・編集・削除できる属性（`attributeDefs`/`playAttributeValues`、EAV方式）。固定カラムは無い
 
 ### 事前準備
 1. **Neon**: https://neon.tech でプロジェクトを作成し、接続文字列（`DATABASE_URL`、pooled connection）を控える
@@ -64,4 +64,20 @@ cd web
 DATABASE_URL=<本番の接続文字列> npm run db:migrate                     # 0001: 属性テーブルを追加
 DATABASE_URL=<本番の接続文字列> npx tsx scripts/migrate-attributes.ts  # 既存データをバックフィル
 DATABASE_URL=<本番の接続文字列> npm run db:migrate                     # 0002: 旧カラム（play_name, formation）を削除
+```
+
+### スライド変更検知カラムの追加（一度だけ）
+登録時のスライド画像のハッシュを保存する`plays.slide_hash`カラムを追加する（既存データはそのまま。追加前に登録したプレーは「変更チェック不可」と表示される）。開発用・本番の両方のDBで一度実行する:
+```
+cd web
+npm run db:migrate                                          # 開発用DB
+DATABASE_URL=<本番の接続文字列> npm run db:migrate           # 本番DB（0003: slide_hashを追加）
+```
+
+### 属性を「選択式＋新規入力」に統一（一度だけ）
+全ての属性を選択肢リスト（`type = select`）に統一する。自由入力だった属性は、既に使われている値がそのまま選択肢になる。以降、プレー登録時に新しい値を入力するとその属性の選択肢に自動で追加される。開発用・本番の両方のDBで一度実行する:
+```
+cd web
+npm run db:migrate                                          # 開発用DB（0004）
+DATABASE_URL=<本番の接続文字列> npm run db:migrate           # 本番DB
 ```

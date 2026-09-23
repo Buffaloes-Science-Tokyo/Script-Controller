@@ -71,12 +71,19 @@ export const plays = pgTable("plays", {
     .$defaultFn(() => crypto.randomUUID()),
   driveFileId: text("drive_file_id").notNull(),
   slideIndex: integer("slide_index").notNull(),
+  // SHA-256 of the slide's rendered thumbnail at registration time, compared
+  // against the current render to flag slides edited (or shifted by inserted/
+  // deleted slides) since. Null for plays registered before this existed.
+  slideHash: text("slide_hash"),
   createdBy: text("created_by").notNull(),
   updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
 });
 
 // User-defined fields (e.g. "プレー名", "体系"), added/renamed/deleted freely
-// from the Schema tab. `options` is only meaningful when type = "select".
+// from the registration tab. Every attribute is a growable choice list
+// (type = "select"): values typed when registering a play are appended to
+// `options` (lib/attributeValues.ts). "text" only exists in old rows, which
+// migration 0004 converts.
 export const attributeDefs = pgTable("attribute_defs", {
   id: text("id")
     .primaryKey()
@@ -90,7 +97,7 @@ export const attributeDefs = pgTable("attribute_defs", {
 
 // EAV-style value storage: one row per (play, attribute) with a value set.
 // Deleting an attributeDef cascades to delete every play's value for it -
-// deliberate, and warned about in the Schema tab's delete confirmation.
+// deliberate, and warned about in the attribute editor's delete confirmation.
 export const playAttributeValues = pgTable(
   "play_attribute_values",
   {
