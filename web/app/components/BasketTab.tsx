@@ -58,6 +58,7 @@ export function BasketTab({ basket }: { basket: Basket }) {
             variant="row"
             fileId={item.fileId}
             slideIndex={item.slideIndex}
+            thumbnailUrl={item.thumbnailUrl}
             attributes={item.attributes}
             onEdit={() => setEditingPlayId(item.playId)}
             actions={
@@ -89,6 +90,7 @@ export function BasketTab({ basket }: { basket: Basket }) {
           playId={editingItem.playId}
           fileId={editingItem.fileId}
           slideIndex={editingItem.slideIndex}
+          thumbnailUrl={editingItem.thumbnailUrl}
           initialAttributes={editingItem.attributes}
           onClose={() => setEditingPlayId(null)}
           onSaved={(attributes) => {

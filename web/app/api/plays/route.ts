@@ -7,7 +7,7 @@ import { db } from "@/lib/db";
 import { getValidAccessToken } from "@/lib/google";
 import { attachAttributeValues, filterPlayIdsByAttributes, type AttributeFilter } from "@/lib/plays";
 import { attributeDefs, playAttributeValues, plays } from "@/lib/schema";
-import { getCachedSlideHash } from "@/lib/thumbnail-cache";
+import { getCachedSlide, persistentThumbnailUrl } from "@/lib/thumbnail-cache";
 
 // Rendering stops after ~20s (lib/thumbnail-cache.ts); leave headroom for
 // the Drive copy/cleanup around it.
@@ -27,6 +27,7 @@ export async function POST(request: NextRequest) {
   const slideIndex = Number(body.slideIndex);
   const attributeValues: Record<string, unknown> =
     body.attributes && typeof body.attributes === "object" ? body.attributes : {};
+  const overwrite = body.overwrite === true;
 
   if (!driveFileId) {
     return NextResponse.json({ error: "driveFileId is required" }, { status: 400 });
@@ -35,21 +36,37 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "slideIndex must be a non-negative integer" }, { status: 400 });
   }
 
+  // One play per slide: re-registering a slide overwrites its existing play,
+  // but only when the client confirmed it (the form's "上書きしますか？").
+  const existingPlays = await db
+    .select({ id: plays.id })
+    .from(plays)
+    .where(and(eq(plays.driveFileId, driveFileId), eq(plays.slideIndex, slideIndex)))
+    .orderBy(desc(plays.updatedAt));
+  if (existingPlays.length > 0 && !overwrite) {
+    return NextResponse.json(
+      { error: "このスライドは既に登録されています。", code: "already_registered" },
+      { status: 409 }
+    );
+  }
+
   // Snapshot the slide's current render so later views can tell whether it
   // changed since registration. Read from the cache only: the registration
   // form has just loaded (rendered) this deck, and saving must not wait on -
   // or fail because of - rendering.
   let slideHash: string;
+  let thumbnailUrl: string | null;
   try {
     const accessToken = await getValidAccessToken(session.user.id);
-    const hash = await getCachedSlideHash(accessToken, driveFileId, slideIndex);
-    if (!hash) {
+    const cachedSlide = await getCachedSlide(accessToken, driveFileId, slideIndex);
+    if (!cachedSlide) {
       return NextResponse.json(
         { error: "このスライドの画像を生成中です。表示されてからもう一度保存してください。" },
         { status: 503 }
       );
     }
-    slideHash = hash;
+    slideHash = cachedSlide.hash;
+    thumbnailUrl = persistentThumbnailUrl(cachedSlide.url);
   } catch (err) {
     const status = err instanceof RangeError ? 400 : 500;
     return NextResponse.json({ error: (err as Error).message }, { status });
@@ -61,10 +78,26 @@ export async function POST(request: NextRequest) {
   }
   const rowsToInsert = prepared.rows;
 
-  const [play] = await db
-    .insert(plays)
-    .values({ driveFileId, slideIndex, slideHash, createdBy: session.user.id })
-    .returning();
+  let play: typeof plays.$inferSelect;
+  if (existingPlays.length > 0) {
+    // Overwrite the newest play in place (keeping its id, so baskets holding
+    // it stay valid) and drop any older duplicates from before one-per-slide.
+    const [keep, ...duplicates] = existingPlays;
+    [play] = await db
+      .update(plays)
+      .set({ slideHash, thumbnailUrl, createdBy: session.user.id, updatedAt: new Date() })
+      .where(eq(plays.id, keep.id))
+      .returning();
+    if (duplicates.length > 0) {
+      await db.delete(plays).where(inArray(plays.id, duplicates.map((p) => p.id)));
+    }
+    await db.delete(playAttributeValues).where(eq(playAttributeValues.playId, play.id));
+  } else {
+    [play] = await db
+      .insert(plays)
+      .values({ driveFileId, slideIndex, slideHash, thumbnailUrl, createdBy: session.user.id })
+      .returning();
+  }
 
   if (rowsToInsert.length > 0) {
     await db
@@ -73,7 +106,10 @@ export async function POST(request: NextRequest) {
   }
 
   const [playWithAttributes] = await attachAttributeValues([play]);
-  return NextResponse.json({ play: playWithAttributes }, { status: 201 });
+  return NextResponse.json(
+    { play: playWithAttributes, overwritten: existingPlays.length > 0 },
+    { status: existingPlays.length > 0 ? 200 : 201 }
+  );
 }
 
 export async function GET(request: NextRequest) {

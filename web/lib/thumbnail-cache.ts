@@ -87,22 +87,40 @@ function remember(key: string, entry: DeckEntry) {
 
 async function loadEntry(key: string): Promise<DeckEntry | null> {
   const cached = memoryIndex.get(key);
-  if (cached || !hasBlobCredentials()) return cached ?? null;
+  if (!hasBlobCredentials() || (cached && isComplete(cached))) return cached ?? null;
 
-  // Another server instance may have rendered (part of) this deck.
+  // Another server instance may have rendered (part of) this deck - possibly
+  // since this instance last looked, so an incomplete entry is re-read too.
+  // Otherwise e.g. /api/plays, which never renders, would keep answering
+  // "still rendering" for slides another instance has finished.
+  let manifest: Partial<DeckEntry>;
   try {
     const existing = await head(`${key}/manifest.json`);
-    const res = await fetch(existing.url);
-    if (!res.ok) return null;
-    const manifest = (await res.json()) as Partial<DeckEntry>;
-    if (!Array.isArray(manifest.urls) || !Array.isArray(manifest.hashes)) return null;
-    const entry = { urls: manifest.urls, hashes: manifest.hashes };
-    remember(key, entry);
-    return entry;
+    // Versioned by upload time so a CDN-cached older manifest isn't served.
+    const res = await fetch(`${existing.url}?v=${existing.uploadedAt.getTime()}`, {
+      cache: "no-store",
+    });
+    if (!res.ok) return cached ?? null;
+    manifest = (await res.json()) as Partial<DeckEntry>;
   } catch (err) {
-    if (err instanceof BlobNotFoundError) return null;
+    if (err instanceof BlobNotFoundError) return cached ?? null;
     throw err;
   }
+  if (!Array.isArray(manifest.urls) || !Array.isArray(manifest.hashes)) return cached ?? null;
+
+  if (cached && cached.urls.length === manifest.urls.length) {
+    // Fill in place: a render round on this instance may be mutating `cached`.
+    manifest.urls.forEach((url, i) => {
+      if (cached.urls[i] === null && url) {
+        cached.urls[i] = url;
+        cached.hashes[i] = manifest.hashes![i] ?? null;
+      }
+    });
+    return cached;
+  }
+  const entry = { urls: manifest.urls, hashes: manifest.hashes };
+  remember(key, entry);
+  return entry;
 }
 
 async function saveEntry(key: string, entry: DeckEntry) {
@@ -231,15 +249,23 @@ async function renderRound(
 }
 
 /**
- * The stored content hash of one slide, from the cache only - never renders.
- * Null when that slide hasn't been rendered (yet); throws RangeError when the
- * deck is known to have fewer slides.
+ * A URL that stays valid on its own (a Blob URL), worth persisting outside
+ * this cache; null for the in-memory data URLs used without Blob.
  */
-export async function getCachedSlideHash(
+export function persistentThumbnailUrl(url: string | null | undefined): string | null {
+  return url && !url.startsWith("data:") ? url : null;
+}
+
+/**
+ * One slide's stored content hash and thumbnail URL, from the cache only -
+ * never renders. Null when that slide hasn't been rendered (yet); throws
+ * RangeError when the deck is known to have fewer slides.
+ */
+export async function getCachedSlide(
   accessToken: string,
   fileId: string,
   slideIndex: number
-): Promise<string | null> {
+): Promise<{ hash: string; url: string } | null> {
   const metadata = await getFileMetadata(accessToken, fileId);
   const entry = await loadEntry(deckCacheKey(fileId, metadata.modifiedTime!));
   if (!entry) return null;
@@ -248,7 +274,9 @@ export async function getCachedSlideHash(
       `slideIndex ${slideIndex} out of range (deck has ${entry.hashes.length} slides)`
     );
   }
-  return entry.hashes[slideIndex];
+  const hash = entry.hashes[slideIndex];
+  const url = entry.urls[slideIndex];
+  return hash && url ? { hash, url } : null;
 }
 
 /**

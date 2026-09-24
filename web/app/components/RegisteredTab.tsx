@@ -134,6 +134,7 @@ export function RegisteredTab({
             key={play.id}
             fileId={play.driveFileId}
             slideIndex={play.slideIndex}
+            thumbnailUrl={play.thumbnailUrl}
             attributes={play.attributes}
             onEdit={() => setEditingPlayId(play.id)}
             actions={
@@ -144,6 +145,7 @@ export function RegisteredTab({
                     playId: play.id,
                     fileId: play.driveFileId,
                     slideIndex: play.slideIndex,
+                    thumbnailUrl: play.thumbnailUrl,
                     attributes: play.attributes,
                   })
                 }
@@ -164,6 +166,7 @@ export function RegisteredTab({
           playId={editingPlay.id}
           fileId={editingPlay.driveFileId}
           slideIndex={editingPlay.slideIndex}
+          thumbnailUrl={editingPlay.thumbnailUrl}
           initialAttributes={editingPlay.attributes}
           onClose={() => setEditingPlayId(null)}
           onSaved={(attributes) => handleSaved(editingPlay.id, attributes)}

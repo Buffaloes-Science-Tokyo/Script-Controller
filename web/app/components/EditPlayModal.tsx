@@ -12,6 +12,7 @@ export function EditPlayModal({
   playId,
   fileId,
   slideIndex,
+  thumbnailUrl,
   initialAttributes,
   onClose,
   onSaved,
@@ -20,6 +21,7 @@ export function EditPlayModal({
   playId: string;
   fileId: string;
   slideIndex: number;
+  thumbnailUrl?: string | null;
   initialAttributes: PlayAttributeValue[];
   onClose: () => void;
   onSaved: (attributes: PlayAttributeValue[]) => void;
@@ -77,7 +79,12 @@ export function EditPlayModal({
       <div className="modalBox editPlayModal" onClick={(e) => e.stopPropagation()}>
         <h2>プレーを編集</h2>
         <div className="modalThumb">
-          <SlideThumbnail fileId={fileId} slideIndex={slideIndex} alt={`スライド${slideIndex + 1}`} />
+          <SlideThumbnail
+            fileId={fileId}
+            slideIndex={slideIndex}
+            thumbnailUrl={thumbnailUrl}
+            alt={`スライド${slideIndex + 1}`}
+          />
         </div>
         <form className="adminForm" onSubmit={handleSubmit}>
           {attributeDefs.map((attribute) => (

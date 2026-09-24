@@ -21,6 +21,8 @@ export type Play = {
   slideIndex: number;
   /** Hash of the slide's render at registration; null for older plays. */
   slideHash?: string | null;
+  /** Stored render of the slide at registration; null when not stored. */
+  thumbnailUrl?: string | null;
   attributes: PlayAttributeValue[];
 };
 
@@ -28,6 +30,7 @@ export type BasketItem = {
   playId: string;
   fileId: string;
   slideIndex: number;
+  thumbnailUrl?: string | null;
   attributes: PlayAttributeValue[];
 };
 

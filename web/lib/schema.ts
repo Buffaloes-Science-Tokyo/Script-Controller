@@ -75,6 +75,11 @@ export const plays = pgTable("plays", {
   // against the current render to flag slides edited (or shifted by inserted/
   // deleted slides) since. Null for plays registered before this existed.
   slideHash: text("slide_hash"),
+  // The slide's rendered thumbnail (Vercel Blob URL) at registration time, so
+  // listing plays can show it without asking Google to render the deck again.
+  // Null for older plays until the deck is next rendered (backfilled by
+  // /api/preview/deck), and when thumbnails aren't stored in Blob (local dev).
+  thumbnailUrl: text("thumbnail_url"),
   createdBy: text("created_by").notNull(),
   updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
 });

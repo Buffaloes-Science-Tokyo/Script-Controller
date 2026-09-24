@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { apiFetch } from "@/lib/api";
+import { ApiError, apiFetch } from "@/lib/api";
 import { useDataVersion } from "@/lib/dataVersion";
 import { loadDeck, useDeck } from "@/lib/deckThumbnails";
 import type { AttributeDef, DriveFile, Play } from "@/lib/types";
@@ -181,15 +181,11 @@ export function AdminTab() {
       setSaveStatus("先にDriveファイルを選択してください。");
       return;
     }
-    if (
-      currentSlidePlays.length > 0 &&
-      !window.confirm("このスライドは既に登録されています。もう1件登録しますか？")
-    ) {
-      return;
-    }
-    setSaveStatus("保存中...");
-    try {
-      await apiFetch("/api/plays", {
+    const overwriteMessage = "このスライドは既に登録されています。上書きしますか？";
+    let overwrite = currentSlidePlays.length > 0;
+    if (overwrite && !window.confirm(overwriteMessage)) return;
+    const save = () =>
+      apiFetch<{ overwritten: boolean }>("/api/plays", {
         method: "POST",
         body: JSON.stringify({
           driveFileId: selectedFile.id,
@@ -198,9 +194,25 @@ export function AdminTab() {
           attributes: Object.fromEntries(
             attributeDefs.map((a) => [a.id, attributeValues[a.id] ?? ""])
           ),
+          overwrite,
         }),
       });
-      setSaveStatus("保存しました。");
+    setSaveStatus("保存中...");
+    try {
+      let result: { overwritten: boolean };
+      try {
+        result = await save();
+      } catch (err) {
+        // Registered elsewhere since this file's plays were loaded.
+        if (!(err instanceof ApiError && err.status === 409) || overwrite) throw err;
+        if (!window.confirm(overwriteMessage)) {
+          setSaveStatus("");
+          return;
+        }
+        overwrite = true;
+        result = await save();
+      }
+      setSaveStatus(result.overwritten ? "上書き保存しました。" : "保存しました。");
       setAttributeValues({});
       setFormResetCount((n) => n + 1);
       // New values become options, so the schema changed too (this also

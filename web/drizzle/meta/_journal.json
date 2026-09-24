@@ -36,6 +36,13 @@
       "when": 1790167805922,
       "tag": "0004_attributes_to_select",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790250548695,
+      "tag": "0005_add_play_thumbnail_url",
+      "breakpoints": true
     }
   ]
 }

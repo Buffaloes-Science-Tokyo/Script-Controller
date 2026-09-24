@@ -12,6 +12,7 @@ function splitTitleAndTags(attributes: PlayAttributeValue[]) {
 type PlayCardProps = {
   fileId: string;
   slideIndex: number;
+  thumbnailUrl?: string | null;
   attributes: PlayAttributeValue[];
   variant?: "card" | "row";
   actions?: React.ReactNode;
@@ -22,6 +23,7 @@ type PlayCardProps = {
 export function PlayCard({
   fileId,
   slideIndex,
+  thumbnailUrl,
   attributes,
   variant = "card",
   actions,
@@ -32,7 +34,12 @@ export function PlayCard({
 
   const content = (
     <div className={`cardClickArea${onEdit ? " clickable" : ""}`} onClick={onEdit}>
-      <SlideThumbnail fileId={fileId} slideIndex={slideIndex} alt={title} />
+      <SlideThumbnail
+        fileId={fileId}
+        slideIndex={slideIndex}
+        thumbnailUrl={thumbnailUrl}
+        alt={title}
+      />
       <div className={bodyClassName}>
         <strong>{title}</strong>
         {tags.map((tag) => (
